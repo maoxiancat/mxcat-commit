@@ -144,7 +144,7 @@ git log -1 --pretty=%B | grep -Ei '^(AI-Co-Authored-By:|Co-authored-by:|Co-Autho
 
 回执是带槽位的样例，不要改结构。先 `git status --short`：工作区不干净就不要写「应已无未提交变更」，改为说明还剩什么。短 hash 与标题用 `git log`；文件数与 ± 行用 `git show --stat`（只有插入写成 `+N 行`，有删除写成 `+A / -B 行`）。括号里点到模块/产物即可。origin 主机是 `github.com`（含 SSH）时用「GitHub」，否则把开头里的 GitHub 改成「远程」。SSH origin 转成 https 网页地址再写 `仓库地址：`；推不出来就省略该行。`Commit：` 块只列本次新建的 commit；分支行「含 … 提交」列这次 `git push` 实际送出的短 hash（可能含更早未推送的）。失败不要用这些开头。
 
-`Commit：` / `标题：` / `变更：`，以及 `远程：` / `分支：` / `仓库地址：`，同一组里不要空行。除最后一项外，每行末尾写 `<br>`，否则聊天 Markdown 会把相邻行折成一段。组与组之间（例如 Commit 块和「当前工作区」、工作区句和远程块）仍空一行。
+`Commit：` / `标题：` / `变更：`，以及 `分支：` / `仓库地址：`，同一组里不要空行。除最后一项外，每行末尾写 `<br>`，否则聊天 Markdown 会把相邻行折成一段。组与组之间（例如 Commit 块和「当前工作区」、工作区句和 push 信息块）仍空一行。不要写 `远程：`。
 
 只提交成功（该次未 push）：
 
@@ -171,7 +171,6 @@ Commit： a1b2c3d<br>
 
 当前工作区应已无未提交变更
 
-远程： https://github.com/owner/repo.git<br>
 分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）<br>
 仓库地址：https://github.com/owner/repo
 ```
@@ -183,7 +182,6 @@ Commit： a1b2c3d<br>
 ```markdown
 已推送到 GitHub。
 
-远程： https://github.com/owner/repo.git<br>
 分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）<br>
 仓库地址：https://github.com/owner/repo
 ```

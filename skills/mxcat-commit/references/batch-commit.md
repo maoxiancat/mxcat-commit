@@ -133,7 +133,7 @@ Body 含反引号时不要改用多个 `-m`。不要在未确认时 `git commit 
 
 ## 7. 成功回执
 
-结构与 `single-commit.md` 第 7 步相同。多条新建 commit 时，按提交顺序重复 `Commit：` / `标题：` / `变更：`（组内不要空行，除最后一项外行末写 `<br>`）。先 `git status --short` 再决定是否写「应已无未提交变更」。origin 不是 GitHub 时，把开头里的 GitHub 改成「远程」。`远程：` / `分支：` / `仓库地址：` 同样组内不要空行，用 `<br>` 换行。
+结构与 `single-commit.md` 第 7 步相同。多条新建 commit 时，按提交顺序重复 `Commit：` / `标题：` / `变更：`（组内不要空行，除最后一项外行末写 `<br>`）。先 `git status --short` 再决定是否写「应已无未提交变更」。origin 不是 GitHub 时，把开头里的 GitHub 改成「远程」。`分支：` / `仓库地址：` 组内不要空行，用 `<br>` 换行；不要写 `远程：`。
 
 只提交成功（该次未 push）；多条则重复 Commit 块：
 
@@ -162,7 +162,6 @@ Commit： a1b2c3d<br>
 
 当前工作区应已无未提交变更
 
-远程： https://github.com/owner/repo.git<br>
 分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）<br>
 仓库地址：https://github.com/owner/repo
 ```
@@ -172,7 +171,6 @@ Commit： a1b2c3d<br>
 ```markdown
 已推送到 GitHub。
 
-远程： https://github.com/owner/repo.git<br>
 分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）<br>
 仓库地址：https://github.com/owner/repo
 ```
