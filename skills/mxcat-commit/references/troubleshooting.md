@@ -71,7 +71,7 @@ git reset --soft HEAD~1
 - **不要**运行 `git push -u`、`--force` 或 `--force-with-lease`。
 - **不要**假装已经推送。
 - **不要**用「已提交并推送到 GitHub。」或「已推送到 GitHub。」开头。
-- 已成功的 commit 保留。可用「提交已完成。」回执（可邀 push），再另段说明没有推上去。
+- 已成功的 commit 保留。可用「提交已完成。」回执（字段组内用 `<br>` 换行、不要空行；可邀 push），再另段说明没有推上去。
 
 batch 中途某条 commit 或自检失败时，同样不要 push，也不要用成功回执开头。
 

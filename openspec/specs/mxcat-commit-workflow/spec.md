@@ -112,7 +112,7 @@
 - **AND** MUST NOT 使用 `--force` 或 `--force-with-lease`
 
 ### Requirement: 提交或 push 成功后 MUST 输出对应回执
-技能 MUST 按成功路径输出带槽位的中文回执，MUST NOT 在成功时临场改成另一种结构。每条本次新建的 commit MUST 使用如下三行（标签后为全角冒号）：`Commit：` 短 hash、`标题：` 完整 header、`变更：` 文件数、插入行数，以及括号内的简短人话摘要；若该 commit 有删除行，变更行 MUST 同时写出删除行数。多条新建 commit 时 MUST 按提交顺序重复这三行。`Commit：` 块只列出本次技能新建的 commit；分支行里「含 … 提交」MUST 列出这次 `git push` 实际送出的短 hash（可能包含更早未推送的 commit）。写「当前工作区应已无未提交变更」之前 MUST 查看 `git status`；若仍有未提交变更，MUST NOT 写这句，MUST 改为说明仍留在工作区的变更。commit 失败、push 失败或无上游时 MUST NOT 使用成功回执。
+技能 MUST 按成功路径输出带槽位的中文回执，MUST NOT 在成功时临场改成另一种结构。每条本次新建的 commit MUST 使用如下三行（标签后为全角冒号）：`Commit：` 短 hash、`标题：` 完整 header、`变更：` 文件数、插入行数，以及括号内的简短人话摘要；若该 commit 有删除行，变更行 MUST 同时写出删除行数。多条新建 commit 时 MUST 按提交顺序重复这三行。`Commit：` / `标题：` / `变更：` 同一组内 MUST NOT 用空行分隔；除最后一项外每行末尾 MUST 写 `<br>`。`远程：` / `分支：` / `仓库地址：` MUST 遵守同一规则。组与组之间 MUST 空一行。`Commit：` 块只列出本次技能新建的 commit；分支行里「含 … 提交」MUST 列出这次 `git push` 实际送出的短 hash（可能包含更早未推送的 commit）。写「当前工作区应已无未提交变更」之前 MUST 查看 `git status`；若仍有未提交变更，MUST NOT 写这句，MUST 改为说明仍留在工作区的变更。commit 失败、push 失败或无上游时 MUST NOT 使用成功回执。
 
 #### Scenario: 只提交成功
 - **WHEN** 用户只批准提交，全部预定 commit 成功，且未在同一次回复中 push
@@ -144,6 +144,11 @@
 - **WHEN** 本次技能只新建一条 commit，且这次 `git push` 还送出了更早未推送的 commit
 - **THEN** `Commit：` 块 MUST 只列出本次新建的那一条
 - **AND** 分支行 MUST 列出这次实际送出的全部短 hash
+
+#### Scenario: 回执字段组内用 br 换行
+- **WHEN** 技能输出 Commit 块或远程 / 分支 / 仓库地址块
+- **THEN** 组内各项 MUST 紧邻，中间 MUST NOT 空行
+- **AND** 除该组最后一项外，每行末尾 MUST 为 `<br>`
 
 ### Requirement: 丢掉的预览条目 MUST 把文件留在工作区
 当用户不要提交某一预览条目时，技能 MUST 只从预览计划中移除该条，MUST NOT 用 git 命令丢弃或还原该条列出的工作区改动。其余条目 MUST 作为新的整单预览再次等待批准。

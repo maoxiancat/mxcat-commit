@@ -133,19 +133,19 @@ Body 含反引号时不要改用多个 `-m`。不要在未确认时 `git commit 
 
 ## 7. 成功回执
 
-结构与 `single-commit.md` 第 7 步相同。多条新建 commit 时，按提交顺序重复 `Commit：` / `标题：` / `变更：` 三行。先 `git status --short` 再决定是否写「应已无未提交变更」。origin 不是 GitHub 时，把开头里的 GitHub 改成「远程」。
+结构与 `single-commit.md` 第 7 步相同。多条新建 commit 时，按提交顺序重复 `Commit：` / `标题：` / `变更：`（组内不要空行，除最后一项外行末写 `<br>`）。先 `git status --short` 再决定是否写「应已无未提交变更」。origin 不是 GitHub 时，把开头里的 GitHub 改成「远程」。`远程：` / `分支：` / `仓库地址：` 同样组内不要空行，用 `<br>` 换行。
 
 只提交成功（该次未 push）；多条则重复 Commit 块：
 
 ```markdown
 提交已完成。
 
-Commit： a1b2c3d
-标题： :sparkles: (charts) 增加空数据占位
+Commit： a1b2c3d<br>
+标题： :sparkles: (charts) 增加空数据占位<br>
 变更： 2 个文件，+40 行（空数据占位与导出禁用）
 
-Commit： b2c3d4e
-标题： :wrench: (charts) 调整空数据文案配置
+Commit： b2c3d4e<br>
+标题： :wrench: (charts) 调整空数据文案配置<br>
 变更： 1 个文件，+8 行（emptyState 文案配置）
 
 当前工作区应已无未提交变更。若要推到 owner/repo，可以说一声我帮你执行 git push。
@@ -156,14 +156,14 @@ Commit： b2c3d4e
 ```markdown
 已提交并推送到 GitHub。
 
-Commit： a1b2c3d
-标题： :sparkles: (charts) 增加空数据占位
+Commit： a1b2c3d<br>
+标题： :sparkles: (charts) 增加空数据占位<br>
 变更： 2 个文件，+40 行（空数据占位与导出禁用）
 
 当前工作区应已无未提交变更
 
-远程： https://github.com/owner/repo.git
-分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）
+远程： https://github.com/owner/repo.git<br>
+分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）<br>
 仓库地址：https://github.com/owner/repo
 ```
 
@@ -172,8 +172,8 @@ Commit： a1b2c3d
 ```markdown
 已推送到 GitHub。
 
-远程： https://github.com/owner/repo.git
-分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）
+远程： https://github.com/owner/repo.git<br>
+分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）<br>
 仓库地址：https://github.com/owner/repo
 ```
 
