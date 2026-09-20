@@ -48,7 +48,7 @@ git diff --cached --stat
 解释
 - :sparkles: 因为这是新的空数据展示，不是修崩溃
 - scope 用 charts，改动都在图表模块
-- 改动部分：`EmptyState.tsx` 新增占位图；`ExportButton` 在无数据时改为 disabled
+- 改动部分：`src/charts/EmptyState.tsx` 新增占位图；`src/charts/ExportButton.tsx` 在无数据时改为 disabled
 
 尚未提交 commit 和 push，请回复「提交」「提交并 push」等进行提交、push，也可以合并 commit 或不要提交某个 commit
 ```
@@ -59,7 +59,7 @@ git diff --cached --stat
 2. 为何这个 scope
 3. **改动了哪些部分**（模块、关键文件或行为；列出将进入这条 commit 的范围）
 
-点到文件/模块/行为即可，不要逐行复述 diff。预览卡之后必须另起一段，**原样**输出上面那句收尾（不得改字；不要写进「解释」）。单条仍用 `## commit 1`，不要写成 `待确认 · 1/1`。
+点到模块/文件/行为即可；列出的每个文件须用仓库相对路径写在反引号里（便于跳转到对应文件），需要定位改动行时可用 `` `startLine:endLine:path` `` 代码引用。不要只写裸文件名、不要逐行复述 diff。预览卡之后必须另起一段，**原样**输出上面那句收尾（不得改字；不要写进「解释」）。单条仍用 `## commit 1`，不要写成 `待确认 · 1/1`。
 
 尚未出示这张预览时，「帮我提交」「合为一个 commit」「提交并 push」「提交并push」只用来进入流程，不是确认；**禁止**因此同轮 commit 或 push。
 

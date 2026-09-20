@@ -49,7 +49,7 @@ git diff --stat
 解释
 - :sparkles: 因为这是新的空数据展示，不是修崩溃
 - scope 用 charts，改动都在图表模块
-- 改动部分：`EmptyState.tsx` 新增占位图；`ExportButton` 在无数据时改为 disabled
+- 改动部分：`src/charts/EmptyState.tsx` 新增占位图；`src/charts/ExportButton.tsx` 在无数据时改为 disabled
 
 ## commit 2
 
@@ -62,12 +62,12 @@ git diff --stat
 解释
 - :wrench: 因为这是配置，不是新功能
 - scope 仍用 charts
-- 改动部分：`charts.config.ts` 增加 emptyState 文案字段
+- 改动部分：`src/charts/charts.config.ts` 增加 emptyState 文案字段
 
 尚未提交 commit 和 push，请回复「提交」「提交并 push」等进行提交、push，也可以合并 commit 或不要提交某个 commit
 ```
 
-每条解释必须覆盖：为何这个 emoji、为何这个 scope、**改动了哪些部分**。点到文件/模块/行为即可，不要逐行复述 diff。全部条目之后必须另起一段，**原样**输出上面那句收尾（不得改字；不要写进某条的「解释」）。条目标题用 `## commit N`，不要写成 `待确认 · 1/N`。
+每条解释必须覆盖：为何这个 emoji、为何这个 scope、**改动了哪些部分**。点到模块/文件/行为即可；列出的每个文件须用仓库相对路径写在反引号里（便于跳转到对应文件），需要定位改动行时可用 `` `startLine:endLine:path` `` 代码引用。不要只写裸文件名、不要逐行复述 diff。全部条目之后必须另起一段，**原样**输出上面那句收尾（不得改字；不要写进某条的「解释」）。条目标题用 `## commit N`，不要写成 `待确认 · 1/N`。
 
 尚未出示这张整单预览时，「帮我提交」「按逻辑分批提交」「提交并 push」「提交并push」只用来进入流程，不是确认；**禁止**因此同轮 commit 或 push。
 
