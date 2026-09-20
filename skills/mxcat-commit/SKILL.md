@@ -46,14 +46,22 @@ git status --short
 
 ## 预览门禁
 
-single 与 batch 都先出示预览，等人确认，再提交。
+single 与 batch 都先出示预览，等人确认，再提交。确认按本轮是否已经出示过预览来判定，不要靠与阶段无关的词表。
 
-- 确认前禁止运行 `git commit`（含 `--file`、`-m`、会创建提交对象的 amend）。
-- 「帮我提交」「自动提交」「split commits」等启动语 **不等于** 确认。
-- 用户改标题、emoji、scope、正文或拆分/合并批次时，更新预览并再次等待，同一次回复里不要提交。
-- 仅当用户本轮已给出完整 cz-emoji 标题，并且明确说「直接提交」时，才允许跳过预览。
+- 确认前禁止运行 `git commit`（含 `--file`、`-m`、会创建提交对象的 amend）。该次回复只批准提交、未要求 push 时，不要运行 `git push`。提交成功后用户再说「帮我 push」「推一下」或 `git push`，可以对当前上游再推一次（不要 `--force`，没有上游不要擅自 `-u`）。
+- **尚未出示预览**：「提交」「帮我提交」「自动提交」「commit」「split commits」等启动语只分析变更并出示预览，**不等于**确认，禁止提交。
+- **已经出示预览**：「提交」「确认提交」「帮我提交」视为批准 commit（不要因此 push）；「提交并 push」视为批准 commit，且全部预定 commit 成功后再 `git push` 一次。不要把单独的「确认」「可以提交」「lgtm」「就这样」当成确认。
+- 用户改标题、emoji、scope、正文，或拆分/合并批次，或不要提交某一条时，更新预览并再次等待，同一次回复里不要提交。丢掉的那条对应文件留在工作区，不要对这些文件运行 `git restore` / `checkout` / `reset`。没有剩余条目则停止并说明。
+- 仅当用户强调不需要预览（「不需要预览」「跳过预览」「不要预览」）时，才允许跳过预览卡。只说「直接提交」、只给完整标题、或启动语里带「提交」，仍须预览。
+- 「合为一条」是改走 single 并重出预览，不是跳过预览。
 
-预览卡至少包含：拟用标题、拟用正文（若有）、以及解释。解释必须覆盖：为何选该 emoji、为何选该 scope、**改动了哪些部分**。点到模块/文件/行为即可，不要逐行复述 diff。确认词例如：确认、可以提交、lgtm、就这样。
+预览卡至少包含：拟用标题、拟用正文（若有）、以及解释。每条预览用 `## commit N` 起头；编号是身份，丢掉后不滑动，不要写成 `待确认 · 1/N`。解释必须覆盖：为何选该 emoji、为何选该 scope、**改动了哪些部分**。点到模块/文件/行为即可，不要逐行复述 diff。
+
+全部预览条目之后必须另起一段，**原样**输出下面这句（不得改字、换序或增删分句；不要写进某条的解释里）：
+
+尚未提交 commit 和 push，请回复「提交」「提交并 push」等进行提交、push，也可以合并 commit 或不要提交某个 commit
+
+提交或 push 成功后，按对应 guide 的回执样例汇报，不要临场改结构。
 
 ## 默认结果约束
 
@@ -85,8 +93,8 @@ single 与 batch 都先出示预览，等人确认，再提交。
 
 | Reference | 何时读取 | 主要内容 |
 |---|---|---|
-| [single-commit.md](references/single-commit.md) | 已确定当前是 single commit 时 | staged 分析、预览卡、确认后提交、自检 |
-| [batch-commit.md](references/batch-commit.md) | 已确定当前是 batch commit 时 | 分组、整单预览、按序提交、中途失败 |
+| [single-commit.md](references/single-commit.md) | 已确定当前是 single commit 时 | staged 分析、预览卡、确认后提交、自检、成功回执 |
+| [batch-commit.md](references/batch-commit.md) | 已确定当前是 batch commit 时 | 分组、整单预览、按序提交、中途失败、成功回执 |
 | [commit-convention.md](references/commit-convention.md) | 需要 canonical 规范时 | header、必写 scope、语言、footer 禁令、完整示例 |
 | [cz-emoji-types.md](references/cz-emoji-types.md) | 常用类型不足以覆盖当前语义时 | 完整 emoji 类型表 |
-| [troubleshooting.md](references/troubleshooting.md) | 遇到异常或恢复场景时 | 自检失败、hook、空行 |
+| [troubleshooting.md](references/troubleshooting.md) | 遇到异常或恢复场景时 | 自检失败、hook、空行、push 无上游、丢掉预览后无剩余项 |
