@@ -4,6 +4,14 @@
 
 不要自动 `git reset` 已经成功的 batch 条目。不要补写或「修好」`AI-Co-Authored-By:`。用户不要提交某一预览条目时，不要对这些文件 `git restore` / `checkout` / `reset`。中途失败、无上游、push 失败时，不要用「提交已完成。」「已提交并推送到 GitHub。」或「已推送到 GitHub。」开头。
 
+## 未预览就 commit 或 push
+
+用户首句说「提交并 push」却被直接提交时，属于违反预览门禁（收尾里的「提交并 push」只适用于**已出预览之后**的确认）。
+
+1. 向用户说明应先看到预览再确认；若 commit 消息不符合预期，见下文撤回单条。
+2. 若需撤销误提交：仅当用户明确要求时，`git reset --soft HEAD~1`（batch 多条则按条数协商），然后回到对应 guide **重出预览与固定收尾**，不要再次跳过预览。
+3. 若已误 push：不要 force push；与用户确认是否 revert 或保留远程，再按 guide 重走预览。
+
 ## 自检失败：标题不合规
 
 提交后 header 对不上 `:emoji: (scope) subject`（或缺 `(scope)`、写成 Unicode emoji、写成 `feat(scope):`）时：

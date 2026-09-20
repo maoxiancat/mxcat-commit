@@ -7,12 +7,18 @@
 ## Requirements
 
 ### Requirement: 技能 MUST 在用户确认前禁止创建 commit
-在用户给出明确确认之前，技能 MUST NOT 运行 `git commit`（含 `--file`、`-m`、amend 创建新提交等会生成提交对象的命令）。判定确认 MUST 按会话阶段，而不是一份与阶段无关的词表。本轮尚未出示预览时，用户说「提交」「帮我提交」「自动提交」「commit」或同类启动意图，技能 MUST 只分析变更并出示预览，MUST NOT 提交。预览已出示后，用户说「提交」「确认提交」「帮我提交」或同等批准 commit 的说法时，技能 MUST 按已确认预览创建对应 commit。预览已出示后用户说「提交并 push」时，技能 MUST 将预览视为已确认（随后是否 push 由 workflow 约定）。「确认」「可以提交」「lgtm」「就这样」单独出现时 MUST NOT 视为确认。
+在用户给出明确确认之前，技能 MUST NOT 运行 `git commit`（含 `--file`、`-m`、amend 创建新提交等会生成提交对象的命令）。判定确认 MUST 按会话阶段，而不是一份与阶段无关的词表。本轮尚未出示预览时，用户说「提交」「帮我提交」「提交并 push」「提交并push」「commit and push」「自动提交」「commit」或同类启动意图，技能 MUST 只分析变更并出示预览与固定收尾，MUST NOT 提交，MUST NOT push。固定收尾中举例的「提交并 push」仅描述预览**之后**可用的确认语，MUST NOT 被解释为允许首轮跳过预览。预览已出示后，用户说「提交」「确认提交」「帮我提交」或同等批准 commit 的说法时，技能 MUST 按已确认预览创建对应 commit。预览已出示后用户说「提交并 push」时，技能 MUST 将预览视为已确认（随后是否 push 由 workflow 约定）。「确认」「可以提交」「lgtm」「就这样」单独出现时 MUST NOT 视为确认。
 
 #### Scenario: 启动语不是确认
 - **WHEN** 用户说「帮我提交」或「提交」或「把这些改动分批提交」，且本轮尚未出示预览
 - **THEN** 技能 MUST 输出预览卡
 - **AND** MUST NOT 创建任何新的 git commit
+
+#### Scenario: 首轮提交并 push 仍须先预览
+- **WHEN** 用户在本轮尚未出示预览时就说「提交并 push」或「提交并push」（含作为首条消息）
+- **THEN** 技能 MUST 输出预览卡与固定收尾
+- **AND** MUST NOT 创建任何新的 git commit
+- **AND** MUST NOT 运行 `git push`
 
 #### Scenario: 预览后说提交才创建 commit
 - **WHEN** 预览已出示且用户回复「提交」「确认提交」或「帮我提交」
