@@ -9,7 +9,7 @@ description: |
 
 ## 安装
 
-项目级：
+项目：
 
 ```bash
 npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit
@@ -27,7 +27,7 @@ npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit -g
 npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit -a cursor -a claude-code
 ```
 
-验证发现见仓库根 `README.md`。
+验证见仓库根 `README.md`。
 
 ## 默认路由
 

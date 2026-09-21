@@ -6,7 +6,7 @@
 
 ## 安装
 
-项目级（当前仓库）：
+项目：
 
 ```bash
 npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit
@@ -24,7 +24,7 @@ npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit -g
 npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit -a cursor -a claude-code
 ```
 
-## 验证发现
+## 验证
 
 列出源里的技能（应出现 `mxcat-commit`，且不要安装）：
 
