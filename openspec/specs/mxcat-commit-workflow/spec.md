@@ -180,8 +180,70 @@ single 与 batch 的流程说明 MUST 按用途分三族授权 git 命令，MUST
 - **AND** 组内各项 MUST 紧邻，中间 MUST NOT 空行
 - **AND** 回执开头句与工作区句 MUST NOT 写成列表项
 
+### Requirement: 同一已跟踪文件 MUST 可按 hunk 分属多条 commit
+batch 中同一个已跟踪文件 MUST 可以出现在多条 commit 里。每条 MUST 只包含预览为该条指定、且属于该文件相对当时 HEAD 的 diff 的 hunk。这些 hunk 在同一计划的各条之间 MUST NOT 重叠。部分提交返回后，该路径的工作区字节 MUST 与调用前一致；成功时该路径的 index blob MUST 等于刚创建的 commit，剩余 hunk MUST 仍以未暂存 diff 留在工作区。本计划中该文件的最后一段若只要剩余的全部改动，MUST 用整文件提交带走这些剩余 diff。其后仍要再切一段时，该段 MUST 再次按部分提交执行。single 在用户未同时要求只提交暂存区时，MUST 把该文件的工作区全文写入这一条，MUST NOT 按 hunk 拆开。
+
+#### Scenario: 两条 commit 各取同一文件的一段
+- **WHEN** batch 预览把同一已跟踪文件的两段不重叠 hunk 分给两条 commit，且用户已批准按序提交
+- **THEN** 第一条 commit 中该文件的 diff MUST 只含分给它的 hunk
+- **AND** 第一条返回后该文件的工作区字节 MUST 与提交前一致
+- **AND** 第二条用整文件提交时，其 diff MUST 只含剩余 hunk
+
+#### Scenario: 后面还有一段要再切
+- **WHEN** 同一文件被分成三段，前两段都不是剩余全部
+- **THEN** 前两段 MUST 各自只提交自己的 hunk
+- **AND** 第三段 MUST 只包含当时仍留在工作区的该文件改动
+
+#### Scenario: single 合为一条时提交工作区全文
+- **WHEN** 用户要求合为一条，且未要求只提交暂存区，该文件同时有已暂存与未暂存改动
+- **THEN** 该条 commit 中该文件 MUST 等于工作区全文
+- **AND** 技能 MUST NOT 把该文件拆进多条 commit
+
+### Requirement: 无法按 hunk 安全拆分时 MUST 停止
+部分提交的 hunk 对不上该文件当时相对 HEAD 的 diff、该路径被 git 视为二进制、该路径是 rename 或 copy 且同时还要拆内容、或该路径尚未进入 HEAD 时，入口 MUST 在创建该条 commit 之前非 0 退出。MUST NOT 改成提交该文件的工作区全文。工作区字节 MUST 与调用前一致。技能 MUST 停止后续预定 commit，MUST NOT 运行 `git push`，MUST NOT 输出成功回执。
+
+#### Scenario: hunk 对不上当前 diff
+- **WHEN** 为某已跟踪文件指定的 hunk 不是该文件当时相对 HEAD 的 diff 的子集
+- **THEN** 入口 MUST 在 `git commit` 之前退出
+- **AND** MUST NOT 创建包含该文件工作区全文的 commit
+- **AND** 该文件的工作区字节 MUST 保持不变
+
+#### Scenario: 二进制或 rename 同时拆内容
+- **WHEN** 要拆开的路径是二进制，或是 rename、copy 且还要按 hunk 拆内容
+- **THEN** 入口 MUST 在创建该条 commit 之前退出
+- **AND** MUST NOT 退回整文件提交
+
+### Requirement: 部分提交后 MUST 核对该文件的 diff
+部分提交的 `git commit` 成功后，入口 MUST 核对该文件在新建 commit 中的 diff 等于本次指定的 hunk。对不上时 MUST 非 0 退出。该 commit MUST 保留，MUST NOT 自动 `reset`。工作区字节仍 MUST 恢复为调用前的内容。技能 MUST 停止后续预定 commit，MUST NOT 运行 `git push`，MUST NOT 输出成功回执。
+
+#### Scenario: diff 与指定 hunk 一致
+- **WHEN** 部分提交成功，且该文件的 commit diff 等于本次指定的 hunk
+- **THEN** 本项自检 MUST 通过
+- **AND** 工作区中该文件 MUST 仍是调用前的字节
+
+#### Scenario: diff 与指定 hunk 不一致
+- **WHEN** 部分提交已经创建 commit，但该文件的 diff 不等于本次指定的 hunk
+- **THEN** 入口 MUST 非 0 退出
+- **AND** 已创建的 commit MUST 保留
+- **AND** 工作区字节 MUST 恢复为调用前的内容
+- **AND** 技能 MUST NOT 继续后续 commit，也 MUST NOT push
+
+### Requirement: 只要暂存区且路径仍有未暂存改动时 MUST 只提交 index blob
+用户要求只提交暂存区，且该条路径上仍有未暂存改动时，`commit_one` MUST 提交该路径在 index 中的 blob，MUST NOT `git add` 工作区全文，MUST NOT 把未暂存 hunk 写入该 commit。调用返回后工作区字节 MUST 与调用前一致，剩余改动 MUST 仍留在工作区。若该路径的 index blob 与 HEAD 相同，MUST 在创建 commit 之前退出，并说明没有可提交的已暂存改动。
+
+#### Scenario: 已暂存的一半被提交
+- **WHEN** 用户只要暂存区，该路径的 index 相对 HEAD 有改动，工作区还有更多改动
+- **THEN** 新建 commit 中该文件的 diff MUST 等于 index 相对 HEAD 的 diff
+- **AND** 工作区字节 MUST 保持为调用前的内容
+- **AND** 未暂存改动 MUST 仍出现在 `git diff` 中
+
+#### Scenario: index 与 HEAD 相同
+- **WHEN** 用户只要暂存区，该路径的未暂存 diff 非空，且 index blob 与 HEAD 相同
+- **THEN** `commit_one` MUST 在创建 commit 之前退出
+- **AND** MUST NOT 提交这些未暂存 hunk
+
 ### Requirement: 提交 MUST 锁预览路径
-single 与 batch 在创建每条 commit 时，MUST 调用当前 shell 对应的入口，并把该条预览列出的仓库相对路径作为它的路径参数。当前 shell 是 sh、bash 或 zsh 时，入口 MUST 是技能目录中的 `scripts/commit_one`。当前 shell 是 Windows PowerShell 时，入口 MUST 是 `scripts/commit_one.ps1`。MUST NOT 在 PowerShell 中调用 `scripts/commit_one`，也 MUST NOT 在 sh 中调用 `scripts/commit_one.ps1`。下文的 `commit_one` 指这次实际调用的入口。该入口 MUST 把这些路径传给 `git commit --only`（或等价的「命令行给出路径」模式）。该 commit 的文件集合 MUST 等于这些路径，MUST NOT 把 index 中其它已暂存路径带进去。未列入该条的已暂存路径在提交后 MUST 仍留在 index。rename 或 delete 时，锁路径 MUST 包含该条预览列出的旧路径与新路径。默认输入为整棵工作树时，`commit_one` MUST 先对这些路径执行 `git add --`，以便纳入 untracked；用户只要暂存区时 MUST NOT `git add` 未暂存文件。`commit_one` MUST NOT 因路径名像密钥、凭证或个人信息而拒绝参数中的路径。
+single 与 batch 在创建每条 commit 时，MUST 调用当前 shell 对应的入口，并把该条预览列出的仓库相对路径作为它的路径参数。当前 shell 是 sh、bash 或 zsh 时，入口 MUST 是技能目录中的 `scripts/commit_one`。当前 shell 是 Windows PowerShell 时，入口 MUST 是 `scripts/commit_one.ps1`。MUST NOT 在 PowerShell 中调用 `scripts/commit_one`，也 MUST NOT 在 sh 中调用 `scripts/commit_one.ps1`。下文的 `commit_one` 指这次实际调用的入口。该入口 MUST 把这些路径传给 `git commit --only`（或等价的「命令行给出路径」模式）。该 commit 的文件集合 MUST 等于这些路径，MUST NOT 把 index 中其它已暂存路径带进去。未列入该条的已暂存路径在提交后 MUST 仍留在 index。rename 或 delete 时，锁路径 MUST 包含该条预览列出的旧路径与新路径。默认输入为整棵工作树时，对整文件路径 `commit_one` MUST 先执行 `git add --`，以便纳入 untracked；用户只要暂存区时，对整文件路径 MUST NOT `git add` 未暂存文件。被标为部分提交的已跟踪路径 MUST NOT 先 `git add` 工作区全文，MUST 提交由当前 HEAD 版本加上该条 hunk 得到的 blob；若 index 中该路径的 blob 已等于这个结果，MUST 改提交该 index blob。`commit_one` MUST NOT 因路径名像密钥、凭证或个人信息而拒绝参数中的路径。
 
 #### Scenario: 其它已暂存路径不进入本次 commit
 - **WHEN** index 中除预览路径外还暂存了其它文件，且用户已批准按该预览经 `commit_one` 提交
@@ -210,6 +272,12 @@ single 与 batch 在创建每条 commit 时，MUST 调用当前 shell 对应的�
 - **WHEN** 当前 shell 是 Windows PowerShell，且用户已批准提交
 - **THEN** 技能 MUST 调用 `scripts/commit_one.ps1`
 - **AND** MUST NOT 调用 `scripts/commit_one`
+
+#### Scenario: 部分路径不提交工作区全文
+- **WHEN** 某已跟踪路径被标为部分提交，且工作区里该文件还含有不属于这条的改动
+- **THEN** 新建 commit 中该文件 MUST 只含这条的 hunk
+- **AND** 调用返回后该文件的工作区字节 MUST 与调用前一致
+- **AND** 同一次调用中的其它整文件路径 MUST 仍按整文件进入该 commit
 
 ### Requirement: 提交消息 MUST 来自本次命令的标准输入
 single 与 batch 在创建每条 commit 时，消息 MUST 从本次 `commit_one` 的标准输入读入。产生消息的命令与该次 `commit_one` MUST 处于同一条管道。`commit_one` MUST 把这段消息交给同一次 `git commit --file -`，或交给只在该次进程内可见、结束即删除的消息来源后再提交。MUST NOT 把消息写入固定共享路径后再读取（包括 `/tmp/commit_msg.txt`）。header 与 body 之间需要空行时，消息生成 MUST 仍显式给出该空行。batch 每一条 MUST 使用自己的管道，MUST NOT 复用上一条的消息来源。
@@ -278,20 +346,6 @@ single 与 batch 在创建每条 commit 时，消息 MUST 从本次 `commit_one`
 - **AND** MUST NOT 运行 `git push`
 - **AND** MUST NOT 使用成功回执开头
 - **AND** 已成功的 commit MUST 保留
-
-### Requirement: 只要暂存区且预览路径仍有未暂存改动时 MUST 停止
-用户要求只提交暂存区时，`commit_one` MUST 在 `git commit` 之前检查该条路径参数是否还有 unstaged 改动（例如这些路径上的 `git diff` 非空）。若仍有，MUST 非 0 退出并说明无法在文件粒度下只提交该文件的 staged hunk，MUST NOT 对这些路径 `git add`，MUST NOT 创建该条 commit。
-
-#### Scenario: 只要暂存区且预览路径工作区干净
-- **WHEN** 用户只要暂存区，且该条预览路径没有 unstaged 改动
-- **THEN** `commit_one` MUST 允许用 `--only` 锁这些路径提交
-- **AND** MUST NOT 对这些路径再 `git add`
-
-#### Scenario: 只要暂存区但预览路径有未暂存改动
-- **WHEN** 用户只要暂存区，且该条预览路径上仍有 unstaged 改动
-- **THEN** `commit_one` MUST 在创建 commit 之前停止
-- **AND** MUST 说明无法只提交这些路径的 staged 部分
-- **AND** MUST NOT 创建该条 commit
 
 ### Requirement: 丢掉的预览条目 MUST 把文件留在工作区
 当用户不要提交某一预览条目时，技能 MUST 只从预览计划中移除该条，MUST NOT 用 git 命令丢弃或还原该条列出的工作区改动。若该句没有用独立的「提交」批准剩余条目，其余条目 MUST 作为新的整单预览再次等待批准。若该句同时批准剩余条目，技能 MUST 按 preview-gate 的子集规则当场提交剩余条，MUST NOT 再出一轮剩余预览等待。
