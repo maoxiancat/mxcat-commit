@@ -1,5 +1,22 @@
 # 更新文档
 
+## 1.2.3（2026-09-23）
+
+- :sparkles: (mxcat-commit) 常用类型短表补上界面、代码格式、安全修复与添加依赖；`:wrench:` 只表示配置，依赖升级、降级、移除或锁版本，只改文案，以及 CI、国际化，才读完整表
+- :bug: (mxcat-commit) 提交消息改为从本次命令的标准输入读入，不再写入固定临时路径
+
+## 1.2.2（2026-09-22）
+
+- :boom: (mxcat-commit) 预览后确认改为独立的「提交」（「好的，提交吧」「可以提交」算批准），点名子集当场做，改字可同句提交；固定收尾缩短为「尚未提交。回复「提交」或「提交并 push」」
+- :sparkles: (mxcat-commit) 预览时提醒从未进过仓库的密钥与个人信息，skills/二进制默认与业务拆条
+- :sparkles: (mxcat-commit) scope 按主语选一个小写英文短词，自检拒绝括号内空白
+- :bug: (mxcat-commit) description 改为分析整棵未提交工作树并默认分批，不再只看 staged
+- :bug: (mxcat-commit) 提交用 `--only` 锁预览路径，并用 `git show` 对照文件集合
+- :bug: (mxcat-commit) 安装与验证改指向本技能目录 README，避免装进业务仓库后读到项目根 README
+- :bug: (mxcat-commit) git 命令改按用途分族授权，自检与回执的只读查询不再被开头四件套挡住
+- :bug: (mxcat-commit) 空行自检改为可判定，有第二段内容时要求 `%b` 非空
+- :memo: (mxcat-commit) 成功回执字段组改用 Markdown 列表换行
+
 ## 1.1.2（2026-09-20）
 
 - :sparkles: (mxcat-commit) 预览解释改动部分须写可跳转的仓库相对路径

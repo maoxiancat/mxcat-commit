@@ -1,7 +1,7 @@
 ---
 name: mxcat-commit
 description: |
-  自动分析 git staged 变更，或将整个未提交工作树拆分为多条使用 cz-emoji shortcode 风格的 commit。
+  分析整棵未提交工作树（staged、unstaged、untracked），先出示预览再按逻辑分批提交；仅当用户明确要求合为一条（或不要拆、就提交一条）时走 single。标题用 cz-emoji shortcode 且必写 (scope)，subject 默认简体中文。
   当用户要求：mxcat-commit, commit code, generate commit message, auto commit, 帮我提交, 自动提交, 生成 commit, write commit message, 代码提交, 提交代码, split commits, batch commit，或表达“看看 git 里没提交的代码并分类后分批提交”时使用此技能。
 ---
 
@@ -9,25 +9,7 @@ description: |
 
 ## 安装
 
-项目：
-
-```bash
-npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit
-```
-
-全局：
-
-```bash
-npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit -g
-```
-
-仅安装到 Cursor 和 Claude Code：
-
-```bash
-npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit -a cursor -a claude-code
-```
-
-验证见仓库根 `README.md`。
+安装与验证见本技能目录 [README.md](README.md)。
 
 ## 默认路由
 
@@ -36,6 +18,8 @@ npx -y skills add maoxiancat/mxcat-commit --skill mxcat-commit -a cursor -a clau
 ```bash
 git status --short
 ```
+
+出预览前看一眼：明显是密钥、个人信息、且尚未进入 HEAD 的路径，仍编进预览并提醒。默认分批时细节见 [batch-commit.md](references/batch-commit.md)；合为一条时见 [single-commit.md](references/single-commit.md)。
 
 默认走 **Batch commit**（按逻辑分批）。
 
@@ -49,9 +33,10 @@ git status --short
 single 与 batch 都先出示预览，等人确认，再提交。确认按**本轮对话里是否已完整输出**预览卡 + 固定收尾来判定，不要靠与阶段无关的词表，也不要因为句子里出现「提交」或「push」就执行。
 
 - 确认前禁止运行 `git commit`（含 `--file`、`-m`、会创建提交对象的 amend）与 `git push`。该次回复只批准提交、未要求 push 时，不要运行 `git push`。提交成功后用户再说「帮我 push」「推一下」或 `git push`，可以对当前上游再推一次（不要 `--force`，没有上游不要擅自 `-u`）。
-- **尚未出示预览**（含用户**第一句**就说）：「提交」「帮我提交」「提交并 push」「提交并push」「commit and push」「自动提交」「commit」「split commits」等——一律只分析变更、出示预览与固定收尾，**不等于**确认，**禁止**同轮 `git commit` / `git push`。收尾里举例的「提交并 push」是**预览之后**才有效的确认语，不能反向当成首轮可跳过预览的口令。
-- **已经出示预览**（同一轮或上一轮已输出完整预览 + 固定收尾）：「提交」「确认提交」「帮我提交」视为批准 commit（不要因此 push）；「提交并 push」视为批准 commit，且全部预定 commit 成功后再 `git push` 一次。不要把单独的「确认」「可以提交」「lgtm」「就这样」当成确认。
-- 用户改标题、emoji、scope、正文，或拆分/合并批次，或不要提交某一条时，更新预览并再次等待，同一次回复里不要提交。丢掉的那条对应文件留在工作区，不要对这些文件运行 `git restore` / `checkout` / `reset`。没有剩余条目则停止并说明。
+- **尚未出示预览**（含用户**第一句**就说）：「提交」「帮我提交」「可以提交」「提交并 push」「提交并push」「commit and push」「自动提交」「commit」「split commits」等——一律只分析变更、出示预览与固定收尾，**不等于**确认，**禁止**同轮 `git commit` / `git push`。收尾里举例的「提交并 push」是**预览之后**才有效的确认语，不能反向当成首轮可跳过预览的口令。
+- **已经出示预览**（同一轮或上一轮已输出完整预览 + 固定收尾）：这句话的主要动作是下令做 commit（独立的「提交」）才批准，不要求等于「提交」两个字。算批准：「提交」「确认提交」「帮我提交」「提交吧」「那就提交」「好的，提交吧」「可以提交」，以及预览后的 `commit`（不要因此 push）。「提交并 push」视为批准 commit，且全部预定（含点名子集）成功后再 `git push` 一次。不要把单独的「确认」「可以」「好的」「行」「ok」「lgtm」「就这样」当成确认；「可以提交吗」「提交吗」也不算。「不要提交」「先别提交」里的「提交」不是独立的「提交」。
+- 点名只提交某几条（「只提交 commit 1」「提交 1 和 3，2 先留着」）当场做被点名的条；没点名的当丢掉：文件留工作区，不要 `git restore` / `checkout` / `reset`，不必再出剩余预览。只说「不要提交 commit N」则重出剩余整单再等；「不要 2，其余提交」当场做剩余。认 `## commit N`；「第一条」对不上就问，不要猜。
+- 只改标题、emoji、scope、正文且没说提交：更新预览再等。同一句改这些并含独立的「提交」：按新稿提交，不要再出一轮。拆开、合并、或「合为一条」即使带「提交」也先重出。丢掉的那条对应文件留在工作区。没有剩余条目则停止并说明。
 - 仅当用户强调不需要预览（「不需要预览」「跳过预览」「不要预览」）时，才允许跳过预览卡。只说「直接提交」、只给完整标题、或启动语里带「提交」，仍须预览。
 - 「合为一条」是改走 single 并重出预览，不是跳过预览。
 
@@ -61,7 +46,7 @@ single 与 batch 都先出示预览，等人确认，再提交。确认按**本�
 
 尚未提交 commit 和 push，请回复「提交」「提交并 push」等进行提交、push，也可以合并 commit 或不要提交某个 commit
 
-提交或 push 成功后，按对应 guide 的回执样例汇报，不要临场改结构。同一组字段（`Commit：` / `标题：` / `变更：`，或 `分支：` / `仓库地址：`）中间不要空行，除最后一项外行末写 `<br>`；不要写 `远程：`。
+提交或 push 成功后，按对应 guide 的回执样例汇报，不要临场改结构。同一组字段（`Commit：` / `标题：` / `变更：`，或 `分支：` / `仓库地址：`）写成 Markdown 无序列表，组内不要空行；开头句与工作区句仍是段落。
 
 ## 默认结果约束
 
@@ -93,7 +78,7 @@ single 与 batch 都先出示预览，等人确认，再提交。确认按**本�
 
 | Reference | 何时读取 | 主要内容 |
 |---|---|---|
-| [single-commit.md](references/single-commit.md) | 已确定当前是 single commit 时 | staged 分析、预览卡、确认后提交、自检、成功回执 |
+| [single-commit.md](references/single-commit.md) | 已确定当前是 single commit 时 | 分析变更、预览卡、确认后提交、自检、成功回执 |
 | [batch-commit.md](references/batch-commit.md) | 已确定当前是 batch commit 时 | 分组、整单预览、按序提交、中途失败、成功回执 |
 | [commit-convention.md](references/commit-convention.md) | 需要 canonical 规范时 | header、必写 scope、语言、footer 禁令、完整示例 |
 | [cz-emoji-types.md](references/cz-emoji-types.md) | 常用类型不足以覆盖当前语义时 | 完整 emoji 类型表 |

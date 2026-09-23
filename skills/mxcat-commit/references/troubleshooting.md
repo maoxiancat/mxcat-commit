@@ -1,8 +1,8 @@
 # Troubleshooting
 
-仅在自检失败、hook 失败、消息空行不对、push 无上游或 push 失败、或丢掉预览后没有剩余条目时读取本文。不要把排查步骤提前写进 `SKILL.md`。
+仅在自检失败、hook 失败、消息空行不对、文件集合与预览不一致、push 无上游或 push 失败、或丢掉预览后没有剩余条目时读取本文。不要把排查步骤提前写进 `SKILL.md`。
 
-不要自动 `git reset` 已经成功的 batch 条目。不要补写或「修好」`AI-Co-Authored-By:`。用户不要提交某一预览条目时，不要对这些文件 `git restore` / `checkout` / `reset`。中途失败、无上游、push 失败时，不要用「提交已完成。」「已提交并推送到 GitHub。」或「已推送到 GitHub。」开头。
+不要自动 `git reset` 已经成功的 batch 条目。仅当用户明确要求撤回已成功的 commit 时，才允许 `git reset --soft`；不要从常规流程抄过来。不要补写或「修好」`AI-Co-Authored-By:`。用户不要提交某一预览条目时，不要对这些文件 `git restore` / `checkout` / `reset`。中途失败、无上游、push 失败时，不要用「提交已完成。」「已提交并推送到 GitHub。」或「已推送到 GitHub。」开头。
 
 ## 未预览就 commit 或 push
 
@@ -14,7 +14,7 @@
 
 ## 自检失败：标题不合规
 
-提交后 header 对不上 `:emoji: (scope) subject`（或缺 `(scope)`、写成 Unicode emoji、写成 `feat(scope):`）时：
+提交后 header 对不上 `:emoji: (scope) subject`（或缺 `(scope)`、括号内空白、写成 Unicode emoji、写成 `feat(scope):`）时：
 
 - 停止后续提交。
 - 向用户报告失败项与 `git log -1 --pretty=%B` 的实际标题。
@@ -23,7 +23,7 @@
 
 ## 自检失败：空行丢失
 
-header 与 body 之间、body 与 `BREAKING CHANGE:` 之间必须恰好一个空行。空行被吃掉时，多半是用了多个 `-m` 或未走 `printf` + `--file`。
+header 与 body 之间、body 与 `BREAKING CHANGE:` 之间必须恰好一个空行。空行被吃掉时，多半是用了多个 `-m` 或未走 `printf` + `--file`。自检打印 `FAIL` 时按本节处理。
 
 处理：
 
@@ -34,7 +34,21 @@ header 与 body 之间、body 与 `BREAKING CHANGE:` 之间必须恰好一个空
 git reset --soft HEAD~1
 ```
 
-3. 回到对应 guide，用 `printf` + `git commit --file` 按已确认预览重写消息。Body 含反引号时尤其不要改回多个 `-m`。
+3. 回到对应 guide，用 `printf` 管道到 `git commit --file -` 按已确认预览重写消息。不要把消息写到固定路径（包括 `/tmp/commit_msg.txt`）。Body 含反引号时尤其不要改回多个 `-m`。
+
+## 自检失败：文件集合与预览不一致
+
+`git show --name-only`（rename 用 `--name-status`）列出的路径对不上该条预览「改动部分」时：
+
+- 停止后续提交。
+- 向用户报告该条预览路径与 `git show` 的实际路径。
+- **不要**运行 `git push`。
+- **不要**用成功回执开头。
+- 不要自动 reset。已成功的 commit 保留。
+- 不要在未确认时 `git commit --amend`。
+- 仅当用户明确要求撤回这一条时，才执行 `git reset --soft HEAD~1`，然后回到对应 guide 重出预览。
+
+常见原因是漏写 `git commit --only --`，把 index 里其它已暂存文件带进了这次 commit。
 
 ## 自检失败：出现禁止页脚
 
@@ -79,7 +93,7 @@ git reset --soft HEAD~1
 - **不要**运行 `git push -u`、`--force` 或 `--force-with-lease`。
 - **不要**假装已经推送。
 - **不要**用「已提交并推送到 GitHub。」或「已推送到 GitHub。」开头。
-- 已成功的 commit 保留。可用「提交已完成。」回执（字段组内用 `<br>` 换行、不要空行；可邀 push），再另段说明没有推上去。
+- 已成功的 commit 保留。可用「提交已完成。」回执（字段组内写成 Markdown 列表、不要空行；可邀 push），再另段说明没有推上去。
 
 batch 中途某条 commit 或自检失败时，同样不要 push，也不要用成功回执开头。
 
@@ -89,5 +103,5 @@ batch 中途某条 commit 或自检失败时，同样不要 push，也不要用�
 
 - 只从预览计划里拿掉该条，对应文件留在工作区。
 - **不要**对这些文件运行 `git restore`、`git checkout` 或 `git reset`。
-- 还有剩余条目：整单重出（含固定收尾），再等确认；同一次回复里不要提交。
+- 还有剩余条目：整单重出（含固定收尾），再等确认；同一次回复里不要提交。同一句还批准剩余条目时，按对应 guide 第 4 步当场提交剩余条，不要走「重出再等」。
 - 没有剩余条目：停止并说明没有待提交项，不要创建 commit，也不要 push。

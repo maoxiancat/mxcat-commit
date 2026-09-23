@@ -33,8 +33,16 @@
 - emoji 必须使用 shortcode，例如 `:bug:`、`:sparkles:`，不得使用 Unicode ✨
 - 不得使用 `feat(scope): subject` 这类文字 type 前缀
 - `scope` 必写，必须写成 `(scope)`，不得省略
-- `scope` 取主要改动所在的模块、目录或功能面，用短词，不要空格
+- `(scope)` 括号内不得有空格或制表符；标题只允许一个 `(scope)`，不得写成 `(auth,api)`
 - `!` 是独立的 breaking 标记；出现时位于 `(scope)` 之后、subject 之前，两侧各一空格
+
+选词（生成时遵守；自检只验括号内无空白）：
+
+- 一个小写英文短词。连字符只保留源名字里已有的（例如包名 `mxcat-commit`），不要把说明收成短横线短语
+- 按这条 commit 的主语选，不按文件路径拼接，也不维护允许名单：产品面、页面或功能用该面短词；共享层或基础设施用该层短词；规范或流程工具用该工具短词
+- 宿主仓库一批 skill 快照用 `(skills)`；只改某一个 skill 用它的包名
+- 看不出单一主面就拆成多条 commit，不要写 `(misc)`、`(all)`、`(update)`、`(wip)`
+- subject 即使用中文，scope 仍用英文短词
 
 ## 语言
 
@@ -137,6 +145,9 @@ BREAKING CHANGE: 重复导出现在会直接报错
 
 ```text
 :sparkles: 增加空数据占位
+:sparkles: (my scope) 增加空数据占位
+:sparkles: (auth,api) 增加空数据占位
+:sparkles: (misc) 增加空数据占位
 ✨ (charts) 增加空数据占位
 feat(charts): 增加空数据占位
 
@@ -149,7 +160,7 @@ Jira-Refs: DATA-6755
 AI-Co-Authored-By: Codex
 ```
 
-上面这些都不合规：缺少 `(scope)`、Unicode emoji、文字 type 前缀、`Jira-Refs:`、`AI-Co-Authored-By:`。
+上面这些都不合规：缺少 `(scope)`、括号内空白、并列 scope、占位词 `misc`、Unicode emoji、文字 type 前缀、`Jira-Refs:`、`AI-Co-Authored-By:`。
 
 ## 常用类型
 
@@ -157,12 +168,24 @@ AI-Co-Authored-By: Codex
 |---|---|
 | `:sparkles:` | 新功能 |
 | `:bug:` | 修复 |
+| `:lipstick:` | 界面和样式 |
+| `:art:` | 代码结构或格式 |
+| `:lock:` | 安全修复 |
+| `:heavy_plus_sign:` | 添加依赖 |
 | `:memo:` | 文档 |
 | `:recycle:` | 重构 |
 | `:zap:` | 性能 |
 | `:white_check_mark:` | 测试 |
-| `:wrench:` | 配置或杂项 |
+| `:wrench:` | 配置 |
 | `:truck:` | 移动或重命名 |
 | `:fire:` | 删除 |
 
-更完整的类型表见 `cz-emoji-types.md`。
+选词（生成时遵守；自检不验 emoji 语义）：
+
+- 界面或样式用 `:lipstick:`
+- 代码结构或格式用 `:art:`
+- 安全修复用 `:lock:`；普通缺陷仍用 `:bug:`
+- 添加依赖用 `:heavy_plus_sign:`
+- 配置用 `:wrench:`
+
+依赖的升级、降级、移除或锁版本，只改文案或字面量，以及 CI、国际化，必须打开 `cz-emoji-types.md` 再选，不要硬套进上表。只改文案用其中的 `:speech_balloon:`。界面改动同时改到文案时，仍用 `:lipstick:`。

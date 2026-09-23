@@ -2,7 +2,29 @@
 
 默认读取本文。仅当用户明确要求「合为一个 commit」（或「合成一条」「不要拆」「就提交一条」）时改走 `single-commit.md`。
 
-只用 `git status`、`git diff`、`git add`、`git commit`。仅当用户在预览后批准「提交并 push」且全部预定 commit 成功，或预定 commit 已成功之后用户明确要求 push 时，才额外使用一次 `git push`。
+按用途使用 git，不要当成封闭四件套。
+
+分析、自检、回执（只读，不改 index / HEAD / 工作区）：
+- `git status`
+- `git diff`（含 `--cached`）
+- `git log`
+- `git show`
+- `git cat-file`
+- `git remote get-url`
+- 以及同等只读查询
+
+写入（有门禁）：
+- `git add --` 该条预览路径（默认整棵工作树；只要暂存区则不要 add）
+- `git commit --file` + `--only --` 同一份路径（预览已确认）
+- `git push`（仅预览后「提交并 push」且全部预定 commit 成功，或提交成功后再说 push；不要 `--force`，没有上游不要擅自 `-u`）
+
+禁止：
+- `--force` / `--force-with-lease`
+- 擅自 `git push -u`
+- 丢掉的预览文件 `git restore` / `checkout` / `reset`
+- 自动 `git reset` 已成功的 batch 条目
+- 未确认 `git commit --amend`
+- 独立 index、shadow worktree、rebase、stash
 
 确认整单之前禁止 `git commit`。该次回复只批准提交、未要求 push 时，不要运行 `git push`。
 
@@ -24,11 +46,19 @@ git status
 git diff
 git diff --cached
 git diff --stat
+git diff --numstat
+git diff --cached --numstat
 ```
 
 按语义拆成多条 commit，例如同一模块/同一意图放一起，无关改动拆开。每条都必须能独立构成合法消息（必写 `(scope)`、默认中文）。不要先写标题再反推 diff。
 
-每条 commit 记下将 `git add` 的路径。不要把预览里没列出的文件塞进某条。
+若路径明显是密钥、凭证或个人信息，且尚未进入 HEAD（未跟踪或 staged 新增），仍写进某条「改动部分」，预览里提醒；不要因为这类文件就停止或从预览拿掉。
+
+`.agents/skills/*` 默认与业务拆成不同条目。用户明确要求合并，或改走「合为一条」，才允许混入。
+
+`git diff --numstat`（以及 `--cached`）两列都是 `-` 的 binary，默认不与功能文件同条，解释须点名这是二进制。用户明确要求合并或合为一条时允许混入。
+
+每条 commit 记下将进入这条 commit 的路径（预览「改动部分」的仓库相对路径；`git add --` 与 `--only --` 共用）。不要把预览里没列出的文件塞进某条。
 
 若逻辑上只有一组，预览写成 `## commit 1`，仍走本文，不要改成 single。
 
@@ -49,7 +79,7 @@ git diff --stat
 解释
 - :sparkles: 因为这是新的空数据展示，不是修崩溃
 - scope 用 charts，改动都在图表模块
-- 改动部分：`src/charts/EmptyState.tsx` 新增占位图；`src/charts/ExportButton.tsx` 在无数据时改为 disabled
+- 改动部分：`src/charts/EmptyState.tsx` 新增占位图；`src/charts/ExportButton.tsx` 在无数据时改为 disabled；`.env`
 
 ## commit 2
 
@@ -64,16 +94,21 @@ git diff --stat
 - scope 仍用 charts
 - 改动部分：`src/charts/charts.config.ts` 增加 emptyState 文案字段
 
-尚未提交 commit 和 push，请回复「提交」「提交并 push」等进行提交、push，也可以合并 commit 或不要提交某个 commit
+提醒
+- `.env` 看起来是密钥/凭证，且从未进过仓库。确认提交会把它写进历史。
+
+尚未提交。回复「提交」或「提交并 push」。
 ```
 
-每条解释必须覆盖：为何这个 emoji、为何这个 scope、**改动了哪些部分**。点到模块/文件/行为即可；列出的每个文件须用仓库相对路径写在反引号里（便于跳转到对应文件），需要定位改动行时可用 `` `startLine:endLine:path` `` 代码引用。不要只写裸文件名、不要逐行复述 diff。全部条目之后必须另起一段，**原样**输出上面那句收尾（不得改字；不要写进某条的「解释」）。条目标题用 `## commit N`，不要写成 `待确认 · 1/N`。
+每条解释必须覆盖：为何这个 emoji、为何这个 scope、**改动了哪些部分**。点到模块/文件/行为即可；列出的每个文件须用仓库相对路径写在反引号里（便于跳转到对应文件），需要定位改动行时可用 `` `startLine:endLine:path` `` 代码引用。不要只写裸文件名、不要逐行复述 diff。有尚未进入 HEAD 的密钥/个人信息时，这些路径仍写在某条「改动部分」；全部条目之后、固定收尾之前列出提醒（仓库相对路径、反引号），说明确认提交会写入历史。无此类路径则不要该块。全部条目之后必须另起一段，**原样**输出上面那句收尾（不得改字；不要写进某条的「解释」或提醒块）。条目标题用 `## commit N`，不要写成 `待确认 · 1/N`。对已含提醒的预览给出独立的「提交」即按预览提交，不必再点名。
 
 尚未出示这张整单预览时，「帮我提交」「按逻辑分批提交」「提交并 push」「提交并push」只用来进入流程，不是确认；**禁止**因此同轮 commit 或 push。
 
 ## 4. 等待整单确认或改稿
 
-改稿时认标题上的 `commit N`，不要把「第二条」当成当前列表下标（丢掉 2 后，列表上第二张是 `commit 3`）。
+预览后看这句话是不是在下令做 commit（独立的「提交」），不要求等于「提交」两个字。
+
+改稿时认标题上的 `commit N`，不要把「第二条」当成当前列表下标（丢掉 2 后，列表上第二张是 `commit 3`）。对不上某个 `## commit N` 就问，不要猜、不要提交。
 
 丢掉某条后剩余条目保留原号：原 `## commit 1` / `## commit 2` / `## commit 3` 丢掉 2 后，重出 `## commit 1` 与 `## commit 3`，不要填补空号。
 
@@ -83,14 +118,19 @@ git diff --stat
 
 | 用户说的 | 动作 |
 |---|---|
-| 尚未出示整单预览时的「提交」「帮我提交」「提交并 push」等 | 只走第 3 步出预览与固定收尾；**不要**第 5 步；**不要** push |
-| 「提交」「确认提交」「帮我提交」（预览已出示后） | 按预览顺序执行第 5 步，不要 `git push` |
+| 尚未出示整单预览时的「提交」「帮我提交」「可以提交」「提交并 push」等 | 只走第 3 步出预览与固定收尾；**不要**第 5 步；**不要** push |
+| 独立的「提交」（预览已出示后）：「提交」「确认提交」「帮我提交」「提交吧」「那就提交」「好的，提交吧」「可以提交」 | 按预览顺序执行第 5 步，不要 `git push` |
 | 「提交并 push」（预览已出示后） | 按预览顺序执行第 5 步；全部 commit 与自检都成功后再一次 `git push` |
+| 「只提交 commit 1」「提交 1 和 3，2 先留着」（预览已出示后） | 按原序只做被点名的条；其余当丢掉：文件留工作区，不要 `git restore` / `checkout` / `reset`，不必再出剩余预览 |
+| 「不要提交 commit 2，其余提交」 | 丢掉 2，当场按原序做剩余条，不要再出一轮 |
+| 「只提交 commit 1 并 push」 | 只做 commit 1，成功后再一次 `git push`；其余留工作区 |
+| 单独的「确认」「可以」「好的」「行」「ok」「lgtm」「就这样」，或「可以提交吗」「提交吗」 | 不算确认；可提醒回复「提交」或「提交并 push」 |
 | 提交已成功后说「帮我 push」「推一下」或 `git push` | 对当前上游一次 `git push`；不要 `--force`；没有上游则报告且不要 `push -u`；成功后用第 7 步 push 回执 |
-| 改某条 emoji / scope / 标题 / 正文 | 更新整单预览（含固定收尾），仍然不提交 |
-| 「把 commit 1 和 commit 3 合并」「把 commit 2 拆开」 | 按上面编号规则重出整单预览（含固定收尾），仍然不提交 |
-| 「不要提交 commit N」 / 不要提交某个 commit | 从预览移除该条；对应文件留在工作区；不要对这些文件 `git restore` / `checkout` / `reset`；重出剩余整单与固定收尾（保留原号，例如丢掉 2 后仍是 1 与 3），仍然不提交。若已无剩余条目，停止并说明没有待提交项 |
-| 「合为一条」 | 改读 `single-commit.md`，重出 single 预览，不在这里提交，也不算跳过预览 |
+| 改某条 emoji / scope / 标题 / 正文（没说提交） | 更新整单预览（含固定收尾），仍然不提交 |
+| 同一句改标题 / emoji / scope / 正文并含独立的「提交」 | 按新稿执行第 5 步，不要再出一轮预览 |
+| 「把 commit 1 和 commit 3 合并」「把 commit 2 拆开」（即使带「提交」） | 按上面编号规则重出整单预览（含固定收尾），仍然不提交 |
+| 「不要提交 commit N」 / 不要提交某个 commit / 「2 先留着」（没有批准剩余） | 从预览移除该条；对应文件留在工作区；不要对这些文件 `git restore` / `checkout` / `reset`；重出剩余整单与固定收尾（保留原号，例如丢掉 2 后仍是 1 与 3），仍然不提交。若已无剩余条目，停止并说明没有待提交项 |
+| 「合为一条」「合为一条并提交」 | 改读 `single-commit.md`，重出 single 预览，不在这里提交，也不算跳过预览 |
 | 强调「不需要预览」「跳过预览」「不要预览」 | 可跳过预览，直接第 5 步；消息仍须遵守 `commit-convention.md` |
 | 「直接提交」或只给了标题，但没强调不需要预览 | 仍出示整单预览与固定收尾，不提交 |
 
@@ -98,21 +138,23 @@ git diff --stat
 
 对预览中的每一条，按顺序：
 
-1. `git add` 该条列出的路径（只要暂存区时，不要 add 未暂存文件）。
-2. `printf` + `git commit --file` 写入该条标题和正文。不要写入 `AI-Co-Authored-By:`、`Co-authored-by:`、`Jira-Refs:`。
-3. 做与 `single-commit.md` 相同的 header / 空行 / 禁页脚自检。
-4. 通过后再处理下一条。
+1. 锁路径 = 该条预览「改动部分」列出的仓库相对路径。rename / delete 要把旧路径和新路径都列入。丢掉的条目即使仍 staged，也不列入剩余条的 `--only`。
+2. 默认整棵工作树时，`git add --` 该条路径（只要暂存区时不要 add）。只要暂存区时，先对这些路径跑 `git diff`：非空则停止并说明无法只提交 staged hunk，不要 `git add`，也不要 `git commit --only`。
+3. `printf` 管道到 `git commit --file -` + `--only --` 同一份路径，写入该条标题和正文。每条 commit 各自一条管道，不要复用上一条的消息来源，也不要写到固定路径。不要写入 `AI-Co-Authored-By:`、`Co-authored-by:`、`Jira-Refs:`。
+4. 做与 `single-commit.md` 相同的自检（header / 空行 / 禁页脚 / 文件集合对照预览路径）。
+5. 通过后再处理下一条。
 
 ```bash
-git add path/to/EmptyState.tsx path/to/ExportButton.tsx
+git add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
 
 printf '%s\n' \
 ':sparkles: (charts) 增加空数据占位' \
 '' \
 '- 折线图无数据时展示占位图' \
-'- 导出入口改为禁用而不是报错' > /tmp/commit_msg.txt
-
-git commit --file /tmp/commit_msg.txt
+'- 导出入口改为禁用而不是报错' \
+| git commit --file - --only -- \
+  src/charts/EmptyState.tsx \
+  src/charts/ExportButton.tsx
 ```
 
 Body 含反引号时不要改用多个 `-m`。不要在未确认时 `git commit --amend`。该次回复只批准「提交」时，全部条目成功后也不要 `git push`。
@@ -134,20 +176,20 @@ Body 含反引号时不要改用多个 `-m`。不要在未确认时 `git commit 
 
 ## 7. 成功回执
 
-结构与 `single-commit.md` 第 7 步相同。多条新建 commit 时，按提交顺序重复 `Commit：` / `标题：` / `变更：`（组内不要空行，除最后一项外行末写 `<br>`）。先 `git status --short` 再决定是否写「应已无未提交变更」。origin 不是 GitHub 时，把开头里的 GitHub 改成「远程」。`分支：` / `仓库地址：` 组内不要空行，用 `<br>` 换行；不要写 `远程：`。
+结构与 `single-commit.md` 第 7 步相同。多条新建 commit 时，按提交顺序重复 `Commit：` / `标题：` / `变更：` 列表组（每项 `- ` 起头，组内不要空行，组与组之间空一行）。先 `git status --short` 再决定是否写「应已无未提交变更」。origin 不是 GitHub 时，把开头里的 GitHub 改成「远程」。`分支：` / `仓库地址：` 同样写成列表。
 
 只提交成功（该次未 push）；多条则重复 Commit 块：
 
 ```markdown
 提交已完成。
 
-Commit： a1b2c3d<br>
-标题： :sparkles: (charts) 增加空数据占位<br>
-变更： 2 个文件，+40 行（空数据占位与导出禁用）
+- Commit： a1b2c3d
+- 标题： :sparkles: (charts) 增加空数据占位
+- 变更： 2 个文件，+40 行（空数据占位与导出禁用）
 
-Commit： b2c3d4e<br>
-标题： :wrench: (charts) 调整空数据文案配置<br>
-变更： 1 个文件，+8 行（emptyState 文案配置）
+- Commit： b2c3d4e
+- 标题： :wrench: (charts) 调整空数据文案配置
+- 变更： 1 个文件，+8 行（emptyState 文案配置）
 
 当前工作区应已无未提交变更。若要推到 owner/repo，可以说一声我帮你执行 git push。
 ```
@@ -157,14 +199,14 @@ Commit： b2c3d4e<br>
 ```markdown
 已提交并推送到 GitHub。
 
-Commit： a1b2c3d<br>
-标题： :sparkles: (charts) 增加空数据占位<br>
-变更： 2 个文件，+40 行（空数据占位与导出禁用）
+- Commit： a1b2c3d
+- 标题： :sparkles: (charts) 增加空数据占位
+- 变更： 2 个文件，+40 行（空数据占位与导出禁用）
 
 当前工作区应已无未提交变更
 
-分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）<br>
-仓库地址：https://github.com/owner/repo
+- 分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）
+- 仓库地址：https://github.com/owner/repo
 ```
 
 提交成功之后再 push 成功：
@@ -172,8 +214,8 @@ Commit： a1b2c3d<br>
 ```markdown
 已推送到 GitHub。
 
-分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）<br>
-仓库地址：https://github.com/owner/repo
+- 分支： main → origin/main（含 d0e8902 与 a1b2c3d 两条提交）
+- 仓库地址：https://github.com/owner/repo
 ```
 
 不要再列出 `Commit：` 块。
