@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 function Show-Usage {
-    [Console]::Error.WriteLine('usage: commit_one.ps1 [--add] -- <path>...')
+    [Console]::Error.WriteLine('usage: commit_one.ps1 [--add] [--hunks <file>] -- <path>...')
     exit 2
 }
 
@@ -136,20 +136,176 @@ function Show-PathMismatch {
     exit 1
 }
 
-$add = $false
-$rest = @($args)
-if ($rest.Count -ge 1 -and $rest[0] -eq '--add') {
-    $add = $true
-    if ($rest.Count -eq 1) {
-        $rest = @()
-    } else {
-        $rest = @($rest[1..($rest.Count - 1)])
+function Write-CommitError {
+    param([string]$Message)
+    [Console]::Error.WriteLine("commit_one: $Message")
+    exit 1
+}
+
+function Test-FixedMessagePath {
+    param([string]$Path)
+    $banned = @('/tmp/commit_msg.txt', '/private/tmp/commit_msg.txt')
+    $slash = ($Path -replace '\\', '/')
+    if ($banned -contains $slash) {
+        return $true
+    }
+    if (Test-Path -LiteralPath $Path) {
+        $full = ([System.IO.Path]::GetFullPath($Path)) -replace '\\', '/'
+        if ($banned -contains $full) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Get-PatchPaths {
+    param([string]$PatchText)
+    $paths = New-Object System.Collections.Generic.List[string]
+    foreach ($raw in ($PatchText -split "`n", -1)) {
+        $line = $raw.TrimEnd("`r")
+        if (-not $line.StartsWith('diff --git a/')) {
+            continue
+        }
+        $rest = $line.Substring(13)
+        $idx = $rest.IndexOf(' b/')
+        if ($idx -lt 0) {
+            continue
+        }
+        $a = $rest.Substring(0, $idx)
+        $b = $rest.Substring($idx + 3)
+        if ($a -cne $b) {
+            return @{ Rename = $a; Paths = @() }
+        }
+        $paths.Add($a)
+    }
+    return @{ Rename = $null; Paths = @($paths) }
+}
+
+function Get-HunkTexts {
+    param([string]$DiffText, [string]$Path)
+    $wantLine = "diff --git a/$Path b/$Path"
+    $want = $false
+    $buf = $null
+    $hunks = New-Object System.Collections.Generic.List[string]
+    foreach ($raw in ($DiffText -split "`n", -1)) {
+        $line = $raw.TrimEnd("`r")
+        if ($line.StartsWith('diff --git ')) {
+            if ($null -ne $buf) {
+                $hunks.Add($buf)
+                $buf = $null
+            }
+            $want = ($line -ceq $wantLine)
+            continue
+        }
+        if ($line.StartsWith('index ') -or $line.StartsWith('--- ') -or $line.StartsWith('+++ ')) {
+            continue
+        }
+        if ($line.StartsWith('@@ ')) {
+            if ($want) {
+                if ($null -ne $buf) {
+                    $hunks.Add($buf)
+                }
+                $buf = $line
+            }
+            continue
+        }
+        if ($want -and $null -ne $buf) {
+            $buf = $buf + "`n" + $line
+        }
+    }
+    if ($null -ne $buf) {
+        $hunks.Add($buf)
+    }
+    return @($hunks)
+}
+
+function Test-HunkSubset {
+    param([string]$PatchText, [string]$FullText, [string]$Path)
+    $part = @(Get-HunkTexts -DiffText $PatchText -Path $Path)
+    $full = @(Get-HunkTexts -DiffText $FullText -Path $Path)
+    if ($part.Count -eq 0) {
+        return $false
+    }
+    foreach ($hunk in $part) {
+        $ok = $false
+        foreach ($cand in $full) {
+            if ($hunk -ceq $cand) {
+                $ok = $true
+                break
+            }
+        }
+        if (-not $ok) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Assert-SplittablePath {
+    param([string]$Path)
+    & git cat-file -e "HEAD:$Path" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-CommitError "无法按 hunk 拆分该路径: $Path"
+    }
+    $num = & git -c core.quotePath=false diff --numstat HEAD -- $Path
+    if ($LASTEXITCODE -ne 0) {
+        Write-CommitError "无法按 hunk 拆分该路径: $Path"
+    }
+    $numText = (@($num) -join "`n")
+    if ($numText.StartsWith('-')) {
+        Write-CommitError "无法按 hunk 拆分该路径: $Path"
+    }
+    foreach ($argsDiff in @(
+            @('-c', 'core.quotePath=false', 'diff', '--name-status', '-M', 'HEAD', '--', $Path),
+            @('-c', 'core.quotePath=false', 'diff', '--cached', '--name-status', '-M', 'HEAD', '--', $Path)
+        )) {
+        $ns = & git @argsDiff
+        if ($LASTEXITCODE -ne 0) {
+            continue
+        }
+        foreach ($raw in @($ns)) {
+            if ([string]::IsNullOrEmpty([string]$raw)) {
+                continue
+            }
+            $code = ([string]$raw).Split("`t")[0]
+            if ($code -cmatch '^[RC]') {
+                Write-CommitError "无法按 hunk 拆分该路径: $Path"
+            }
+        }
     }
 }
-if ($rest.Count -lt 2 -or $rest[0] -ne '--') {
+
+$add = $false
+$hunks = $null
+$argv = @($args)
+$rest = New-Object System.Collections.Generic.List[string]
+$i = 0
+while ($i -lt $argv.Count) {
+    $item = [string]$argv[$i]
+    if ($item -eq '--add') {
+        $add = $true
+        $i++
+        continue
+    }
+    if ($item -eq '--hunks') {
+        if (($i + 1) -ge $argv.Count) {
+            Show-Usage
+        }
+        $hunks = [string]$argv[$i + 1]
+        $i += 2
+        continue
+    }
+    if ($item -eq '--') {
+        $i++
+        while ($i -lt $argv.Count) {
+            $rest.Add([string]$argv[$i])
+            $i++
+        }
+        break
+    }
     Show-Usage
 }
-$paths = @($rest[1..($rest.Count - 1)])
+$paths = @($rest)
 if ($paths.Count -eq 0 -or [string]::IsNullOrEmpty($paths[0])) {
     Show-Usage
 }
@@ -171,6 +327,7 @@ if ($piped.Count -eq 1) {
 }
 
 $tmp = New-TemporaryFile
+$swaps = @()
 try {
     $utf8 = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($tmp.FullName, $raw, $utf8)
@@ -200,51 +357,194 @@ try {
         [void]$expectedItems.Add((ConvertTo-RepoPath -Path $path -Root $root -Prefix $prefix))
     }
     $expected = (Get-SortedPaths -Items $expectedItems.ToArray()) -join "`n"
+    $expectedSet = @($expectedItems)
+    $partial = New-Object System.Collections.Generic.List[string]
+    $pending = New-Object System.Collections.Generic.List[object]
+
+    if (-not [string]::IsNullOrEmpty($hunks)) {
+        if (Test-FixedMessagePath -Path $hunks) {
+            Write-CommitError '不得读取固定共享路径'
+        }
+        if (-not (Test-Path -LiteralPath $hunks -PathType Leaf)) {
+            Write-CommitError '找不到补丁文件'
+        }
+        $hunksAbs = [System.IO.Path]::GetFullPath($hunks)
+        $patchText = [System.IO.File]::ReadAllText($hunksAbs)
+        $parsed = Get-PatchPaths -PatchText $patchText
+        if (-not [string]::IsNullOrEmpty($parsed.Rename)) {
+            Write-CommitError "无法按 hunk 拆分该路径: $($parsed.Rename)"
+        }
+        if (@($parsed.Paths).Count -eq 0) {
+            Write-CommitError '补丁不是这些路径的完整 hunk 子集'
+        }
+        foreach ($pp in @($parsed.Paths)) {
+            $known = $false
+            foreach ($item in $expectedSet) {
+                if ($item -ceq $pp) {
+                    $known = $true
+                    break
+                }
+            }
+            if (-not $known) {
+                Write-CommitError "补丁路径不在参数中: $pp"
+            }
+            Assert-SplittablePath -Path $pp
+            $fullDiff = & git -C $root -c core.quotePath=false diff HEAD -- $pp
+            if ($LASTEXITCODE -ne 0) {
+                Write-CommitError '补丁不是这些路径的完整 hunk 子集'
+            }
+            $fullText = @($fullDiff) -join "`n"
+            if (-not (Test-HunkSubset -PatchText $patchText -FullText $fullText -Path $pp)) {
+                Write-CommitError '补丁不是这些路径的完整 hunk 子集'
+            }
+            $partial.Add($pp)
+        }
+        $idx = Join-Path ([System.IO.Path]::GetTempPath()) ('commit-one-' + [guid]::NewGuid().ToString('n'))
+        $prevIndex = $env:GIT_INDEX_FILE
+        $env:GIT_INDEX_FILE = $idx
+        try {
+            & git -C $root read-tree HEAD
+            if ($LASTEXITCODE -ne 0) {
+                Write-CommitError '补丁不是这些路径的完整 hunk 子集'
+            }
+            & git -C $root apply --cached --whitespace=nowarn -- $hunksAbs
+            if ($LASTEXITCODE -ne 0) {
+                Write-CommitError '补丁不是这些路径的完整 hunk 子集'
+            }
+            foreach ($pp in @($partial)) {
+                $blob = [string](& git rev-parse ":$pp")
+                if ($LASTEXITCODE -ne 0) {
+                    Write-CommitError '补丁不是这些路径的完整 hunk 子集'
+                }
+                $blob = $blob.Trim()
+                $headBlob = [string](& git rev-parse "HEAD:$pp")
+                if ($LASTEXITCODE -ne 0 -or $blob -ceq $headBlob.Trim()) {
+                    Write-CommitError '补丁不是这些路径的完整 hunk 子集'
+                }
+                $pending.Add(@{ Path = $pp; Blob = $blob })
+            }
+        } finally {
+            if ($null -eq $prevIndex) {
+                Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue
+            } else {
+                $env:GIT_INDEX_FILE = $prevIndex
+            }
+            Remove-Item -LiteralPath $idx -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $whole = New-Object System.Collections.Generic.List[string]
+    for ($n = 0; $n -lt $paths.Count; $n++) {
+        $norm = $expectedSet[$n]
+        $isPartial = $false
+        foreach ($pp in @($partial)) {
+            if ($pp -ceq $norm) {
+                $isPartial = $true
+                break
+            }
+        }
+        if (-not $isPartial) {
+            $whole.Add($paths[$n])
+        }
+    }
 
     if ($add) {
-        & git add -- @paths
-        if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
+        if ($whole.Count -gt 0) {
+            & git add -- @whole
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
         }
-    } else {
-        $unstaged = & git diff -- @paths
-        if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-        }
-        $unstagedText = @($unstaged) -join "`n"
-        if ($unstagedText -cmatch '.') {
-            [Console]::Error.WriteLine('commit_one: 无法只提交这些路径的 staged 部分')
-            exit 1
+    } elseif ([string]::IsNullOrEmpty($hunks)) {
+        $whole = New-Object System.Collections.Generic.List[string]
+        for ($n = 0; $n -lt $paths.Count; $n++) {
+            $path = $paths[$n]
+            & git diff --quiet -- $path
+            if ($LASTEXITCODE -eq 0) {
+                $whole.Add($path)
+                continue
+            }
+            $norm = $expectedSet[$n]
+            $indexBlob = ''
+            $headBlob = ''
+            $indexOut = & git rev-parse -q --verify ":$norm" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $indexBlob = ([string]$indexOut).Trim()
+            }
+            $headOut = & git rev-parse -q --verify "HEAD:$norm" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $headBlob = ([string]$headOut).Trim()
+            }
+            if ([string]::IsNullOrEmpty($indexBlob) -or ($indexBlob -ceq $headBlob)) {
+                Write-CommitError '没有可提交的已暂存改动'
+            }
+            $pending.Add(@{ Path = $norm; Blob = $indexBlob })
+            $partial.Add($norm)
         }
     }
 
-    & git rev-parse --verify --quiet HEAD 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        $staged = & git -c core.quotePath=false diff --cached --name-status HEAD -- @paths
-    } else {
-        $staged = & git -c core.quotePath=false diff --cached --name-status -- @paths
-    }
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
-    }
-    $stagedPaths = Get-CommitPaths -Lines @($staged)
-    $collapsedStaged = New-Object System.Collections.Generic.List[string]
-    foreach ($stagedPath in @($stagedPaths)) {
-        $shown = Collapse-RepoPath -Rel (($stagedPath -replace '\\', '/'))
-        if ($shown.Escaped -or [string]::IsNullOrEmpty($shown.Path)) {
-            [void]$collapsedStaged.Add($stagedPath)
+    if ($whole.Count -gt 0) {
+        & git rev-parse --verify --quiet HEAD 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $staged = & git -c core.quotePath=false diff --cached --name-status HEAD -- @whole
         } else {
-            [void]$collapsedStaged.Add($shown.Path)
+            $staged = & git -c core.quotePath=false diff --cached --name-status -- @whole
+        }
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        $wholeNorms = New-Object System.Collections.Generic.List[string]
+        foreach ($path in @($whole)) {
+            $wholeNorms.Add((ConvertTo-RepoPath -Path $path -Root $root -Prefix $prefix))
+        }
+        $expectedWhole = (Get-SortedPaths -Items $wholeNorms.ToArray()) -join "`n"
+        $stagedPaths = Get-CommitPaths -Lines @($staged)
+        $collapsedStaged = New-Object System.Collections.Generic.List[string]
+        foreach ($stagedPath in @($stagedPaths)) {
+            $shown = Collapse-RepoPath -Rel (($stagedPath -replace '\\', '/'))
+            if ($shown.Escaped -or [string]::IsNullOrEmpty($shown.Path)) {
+                [void]$collapsedStaged.Add($stagedPath)
+            } else {
+                [void]$collapsedStaged.Add($shown.Path)
+            }
+        }
+        $actual = (Get-SortedPaths -Items $collapsedStaged.ToArray()) -join "`n"
+        if ($expectedWhole -cne $actual) {
+            Show-PathMismatch -Expected $expectedWhole -Actual $actual
         }
     }
-    $actual = (Get-SortedPaths -Items $collapsedStaged.ToArray()) -join "`n"
-    if ($expected -cne $actual) {
-        Show-PathMismatch -Expected $expected -Actual $actual
+
+    $made = New-Object System.Collections.Generic.List[object]
+    foreach ($item in @($pending)) {
+        $dest = Join-Path $root ($item.Path -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+        $backup = $null
+        $kind = 'm'
+        if (Test-Path -LiteralPath $dest) {
+            $backup = New-TemporaryFile
+            Copy-Item -LiteralPath $dest -Destination $backup.FullName -Force
+            $kind = 'f'
+        }
+        $made.Add(@{ Path = $item.Path; Kind = $kind; Backup = $(if ($backup) { $backup.FullName } else { $null }); Dest = $dest })
+        $swaps = @($made)
+        $blobFile = Join-Path ([System.IO.Path]::GetTempPath()) ('commit-one-blob-' + [guid]::NewGuid().ToString('n'))
+        $proc = Start-Process -FilePath git -ArgumentList @('cat-file', 'blob', $item.Blob) -RedirectStandardOutput $blobFile -Wait -PassThru -NoNewWindow
+        if ($proc.ExitCode -ne 0) {
+            exit $proc.ExitCode
+        }
+        Copy-Item -LiteralPath $blobFile -Destination $dest -Force
+        Remove-Item -LiteralPath $blobFile -Force -ErrorAction SilentlyContinue
     }
 
     & git commit --file $tmp.FullName --only -- @paths
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
+    }
+
+    foreach ($item in @($pending)) {
+        $got = [string](& git rev-parse "HEAD:$($item.Path)")
+        if ($LASTEXITCODE -ne 0 -or $got.Trim() -cne $item.Blob) {
+            Write-CommitError '文件 diff 与指定 hunk 不一致'
+        }
     }
 
     $show = & git -c core.quotePath=false --no-pager show --name-status --pretty=format: HEAD
@@ -266,5 +566,13 @@ try {
         Show-PathMismatch -Expected $expected -Actual $actual
     }
 } finally {
+    foreach ($swap in @($swaps)) {
+        if ($swap.Kind -eq 'f' -and -not [string]::IsNullOrEmpty($swap.Backup)) {
+            Copy-Item -LiteralPath $swap.Backup -Destination $swap.Dest -Force
+            Remove-Item -LiteralPath $swap.Backup -Force -ErrorAction SilentlyContinue
+        } elseif (-not [string]::IsNullOrEmpty($swap.Dest)) {
+            Remove-Item -LiteralPath $swap.Dest -Force -ErrorAction SilentlyContinue
+        }
+    }
     Remove-Item -LiteralPath $tmp.FullName -Force -ErrorAction SilentlyContinue
 }

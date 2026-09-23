@@ -3,7 +3,7 @@
 set -eu
 
 usage() {
-  echo "usage: commit_one [--add] -- <path>..." >&2
+  echo "usage: commit_one [--add] [--hunks <file>] -- <path>..." >&2
   exit 2
 }
 
@@ -109,22 +109,208 @@ fail_mismatch() {
   exit 1
 }
 
+die() {
+  echo "commit_one: $*" >&2
+  exit 1
+}
+
+# 从 unified diff 抽出某个路径的完整 hunk。每个 hunk 写成 $3/N。
+extract_hunks() {
+  _diff=$1
+  _path=$2
+  _dir=$3
+  mkdir -p "$_dir"
+  awk -v path="$_path" -v dir="$_dir" '
+    function flush() {
+      if (buf != "") {
+        n++
+        out = dir "/" n
+        printf "%s\n", buf > out
+        close(out)
+        buf = ""
+      }
+    }
+    BEGIN { want = 0; buf = ""; n = 0 }
+    /^diff --git / {
+      flush()
+      wantline = "diff --git a/" path " b/" path
+      want = ($0 == wantline)
+      next
+    }
+    /^index / || /^--- / || /^\+\+\+ / { next }
+    /^@@ / {
+      if (want) {
+        flush()
+        buf = $0
+      }
+      next
+    }
+    {
+      if (want && buf != "")
+        buf = buf "\n" $0
+    }
+    END { if (want) flush() }
+  ' "$_diff"
+}
+
+hunks_are_subset() {
+  _patch=$1
+  _full=$2
+  _path=$3
+  rm -rf "$state/part" "$state/full"
+  extract_hunks "$_patch" "$_path" "$state/part"
+  extract_hunks "$_full" "$_path" "$state/full"
+  _found=0
+  for _hunk in "$state/part"/*; do
+    [ -f "$_hunk" ] || return 1
+    _found=1
+    _ok=0
+    for _cand in "$state/full"/*; do
+      [ -f "$_cand" ] || continue
+      if cmp -s "$_hunk" "$_cand"; then
+        _ok=1
+        break
+      fi
+    done
+    [ "$_ok" -eq 1 ] || return 1
+  done
+  [ "$_found" -eq 1 ]
+}
+
+patch_paths() {
+  awk '
+    /^diff --git / {
+      line = $0
+      sub(/^diff --git a\//, "", line)
+      idx = index(line, " b/")
+      if (idx == 0)
+        next
+      a = substr(line, 1, idx - 1)
+      b = substr(line, idx + 3)
+      if (a != b) {
+        print "RENAME\t" a
+        next
+      }
+      print a
+    }
+  ' "$1"
+}
+
+is_fixed_message_path() {
+  _p=$1
+  case $_p in
+    /tmp/commit_msg.txt|/private/tmp/commit_msg.txt) return 0 ;;
+  esac
+  _dir=$(dirname -- "$_p")
+  _base=$(basename -- "$_p")
+  if [ -d "$_dir" ]; then
+    _phys=$(CDPATH= cd -P -- "$_dir" && pwd)/$_base
+    case $_phys in
+      /tmp/commit_msg.txt|/private/tmp/commit_msg.txt) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
+path_in_list() {
+  printf '%s\n' "$1" | grep -Fxq -- "$2"
+}
+
+reject_partial_path() {
+  _path=$1
+  if ! git cat-file -e "HEAD:$_path" 2>/dev/null; then
+    die "无法按 hunk 拆分该路径: $_path"
+  fi
+  _num=$(git -c core.quotePath=false diff --numstat HEAD -- "$_path" || true)
+  case $_num in
+    "-"*) die "无法按 hunk 拆分该路径: $_path" ;;
+  esac
+  _ns=$(git -c core.quotePath=false diff --name-status -M HEAD -- "$_path" || true)
+  _ns2=$(git -c core.quotePath=false diff --cached --name-status -M HEAD -- "$_path" || true)
+  _code=${_ns%%	*}
+  _code2=${_ns2%%	*}
+  case $_code in
+    R*|C*) die "无法按 hunk 拆分该路径: $_path" ;;
+  esac
+  case $_code2 in
+    R*|C*) die "无法按 hunk 拆分该路径: $_path" ;;
+  esac
+}
+
+record_swap() {
+  _path=$1
+  _blob=$2
+  swap_n=$((swap_n + 1))
+  printf '%s\n' "$_path" > "$state/name.$swap_n"
+  printf '%s\n' "$_blob" > "$state/blob.$swap_n"
+  _file=$repo_root/$_path
+  if [ -e "$_file" ] || [ -L "$_file" ]; then
+    cp -p "$_file" "$state/bak.$swap_n"
+    printf '%s\n' f > "$state/kind.$swap_n"
+  else
+    printf '%s\n' m > "$state/kind.$swap_n"
+  fi
+  git cat-file blob "$_blob" > "$_file"
+}
+
+restore_swaps() {
+  _i=1
+  while [ -f "$state/kind.$_i" ]; do
+    _path=$(cat "$state/name.$_i")
+    _file=$repo_root/$_path
+    if [ "$(cat "$state/kind.$_i")" = f ]; then
+      cp -p "$state/bak.$_i" "$_file"
+    else
+      rm -f "$_file"
+    fi
+    _i=$((_i + 1))
+  done
+}
+
+cleanup() {
+  if [ -n "${state:-}" ] && [ -d "$state" ]; then
+    restore_swaps
+    rm -rf "$state"
+  fi
+  rm -f "${tmp:-}" "${paths_tmp:-}" "${args_tmp:-}" "${whole_tmp:-}" "${partial_tmp:-}"
+}
+
 add=0
-if [ "${1:-}" = "--add" ]; then
-  add=1
-  shift
-fi
-if [ "${1:-}" != "--" ]; then
-  usage
-fi
-shift
+hunks=
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    --add)
+      add=1
+      shift
+      ;;
+    --hunks)
+      if [ "$#" -lt 2 ]; then
+        usage
+      fi
+      hunks=$2
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
 if [ "$#" -eq 0 ]; then
   usage
 fi
 
 tmp=$(mktemp)
 paths_tmp=$(mktemp)
-trap 'rm -f "$tmp" "$paths_tmp"' EXIT INT TERM
+args_tmp=$(mktemp)
+whole_tmp=$(mktemp)
+partial_tmp=$(mktemp)
+state=$(mktemp -d)
+swap_n=0
+trap cleanup EXIT INT TERM
 cat > "$tmp"
 
 dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -134,35 +320,156 @@ repo_root=$(git rev-parse --show-toplevel)
 repo_phys=$(CDPATH= cd -P -- "$repo_root" && pwd)
 repo_prefix=$(git rev-parse --show-prefix)
 : > "$paths_tmp"
+: > "$args_tmp"
+: > "$whole_tmp"
+: > "$partial_tmp"
 for _arg in "$@"; do
+  printf '%s\n' "$_arg" >> "$args_tmp"
   normalize_arg "$_arg" >> "$paths_tmp"
 done
 expected=$(LC_ALL=C sort -u "$paths_tmp")
 
+if [ -n "$hunks" ]; then
+  if is_fixed_message_path "$hunks"; then
+    die "不得读取固定共享路径"
+  fi
+  if [ ! -f "$hunks" ]; then
+    die "找不到补丁文件"
+  fi
+  hunks_abs=$(CDPATH= cd -P -- "$(dirname -- "$hunks")" && pwd)/$(basename -- "$hunks")
+  _listed=$(patch_paths "$hunks_abs")
+  if printf '%s\n' "$_listed" | grep -q '^RENAME	'; then
+    die "无法按 hunk 拆分该路径: $(printf '%s\n' "$_listed" | awk -F '\t' '/^RENAME/ { print $2; exit }')"
+  fi
+  if [ -z "$_listed" ]; then
+    die "补丁不是这些路径的完整 hunk 子集"
+  fi
+  printf '%s\n' "$_listed" > "$state/patch-paths"
+  while IFS= read -r _pp; do
+    [ -n "$_pp" ] || continue
+    if ! path_in_list "$expected" "$_pp"; then
+      die "补丁路径不在参数中: $_pp"
+    fi
+    reject_partial_path "$_pp"
+    git -c core.quotePath=false diff HEAD -- "$_pp" > "$state/full.diff"
+    if ! hunks_are_subset "$hunks_abs" "$state/full.diff" "$_pp"; then
+      die "补丁不是这些路径的完整 hunk 子集"
+    fi
+    printf '%s\n' "$_pp" >> "$partial_tmp"
+  done < "$state/patch-paths"
+  _idx=$state/index
+  rm -f "$_idx"
+  if ! (cd "$repo_root" && GIT_INDEX_FILE=$_idx git read-tree HEAD); then
+    die "补丁不是这些路径的完整 hunk 子集"
+  fi
+  if ! (cd "$repo_root" && GIT_INDEX_FILE=$_idx git apply --cached --whitespace=nowarn "$hunks_abs"); then
+    die "补丁不是这些路径的完整 hunk 子集"
+  fi
+  while IFS= read -r _pp; do
+    [ -n "$_pp" ] || continue
+    _blob=$(GIT_INDEX_FILE=$_idx git rev-parse ":$_pp") || die "补丁不是这些路径的完整 hunk 子集"
+    _head=$(git rev-parse "HEAD:$_pp")
+    if [ "$_blob" = "$_head" ]; then
+      die "补丁不是这些路径的完整 hunk 子集"
+    fi
+    printf '%s\t%s\n' "$_pp" "$_blob" >> "$state/pending"
+  done < "$partial_tmp"
+fi
+
+while IFS= read -r _arg; do
+  [ -n "$_arg" ] || continue
+  _norm=$(normalize_arg "$_arg")
+  if path_in_list "$(cat "$partial_tmp" 2>/dev/null || true)" "$_norm"; then
+    continue
+  fi
+  printf '%s\n' "$_arg" >> "$whole_tmp"
+done < "$args_tmp"
+
 if [ "$add" -eq 1 ]; then
-  git add -- "$@"
-else
-  unstaged=$(git diff -- "$@")
-  if printf '%s\n' "$unstaged" | grep -q .; then
-    echo "commit_one: 无法只提交这些路径的 staged 部分" >&2
-    exit 1
+  while IFS= read -r _arg; do
+    [ -n "$_arg" ] || continue
+    git add -- "$_arg"
+  done < "$whole_tmp"
+elif [ -z "$hunks" ]; then
+  while IFS= read -r _arg; do
+    [ -n "$_arg" ] || continue
+    if git diff --quiet -- "$_arg"; then
+      continue
+    fi
+    _norm=$(normalize_arg "$_arg")
+    _index=$(git rev-parse -q --verify ":$_norm" 2>/dev/null || true)
+    _head=$(git rev-parse -q --verify "HEAD:$_norm" 2>/dev/null || true)
+    if [ -z "$_index" ] || [ "$_index" = "$_head" ]; then
+      die "没有可提交的已暂存改动"
+    fi
+    printf '%s\t%s\n' "$_norm" "$_index" >> "$state/pending"
+    printf '%s\n' "$_norm" >> "$partial_tmp"
+  done < "$args_tmp"
+  : > "$whole_tmp"
+  while IFS= read -r _arg; do
+    [ -n "$_arg" ] || continue
+    _norm=$(normalize_arg "$_arg")
+    if path_in_list "$(cat "$partial_tmp")" "$_norm"; then
+      continue
+    fi
+    printf '%s\n' "$_arg" >> "$whole_tmp"
+  done < "$args_tmp"
+fi
+
+if [ -s "$whole_tmp" ]; then
+  if git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    staged_status=$(
+      set --
+      while IFS= read -r _arg; do
+        [ -n "$_arg" ] || continue
+        set -- "$@" "$_arg"
+      done < "$whole_tmp"
+      git -c core.quotePath=false diff --cached --name-status HEAD -- "$@"
+    )
+  else
+    staged_status=$(
+      set --
+      while IFS= read -r _arg; do
+        [ -n "$_arg" ] || continue
+        set -- "$@" "$_arg"
+      done < "$whole_tmp"
+      git -c core.quotePath=false diff --cached --name-status -- "$@"
+    )
+  fi
+  actual=$(printf '%s\n' "$staged_status" | paths_from_status | LC_ALL=C sort -u)
+  expected_whole=$(while IFS= read -r _arg; do
+    [ -n "$_arg" ] || continue
+    normalize_arg "$_arg"
+  done < "$whole_tmp" | LC_ALL=C sort -u)
+  expected=$expected_whole
+  if [ "$expected" != "$actual" ]; then
+    fail_mismatch
   fi
 fi
 
-if git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-  staged_status=$(git -c core.quotePath=false diff --cached --name-status HEAD -- "$@")
-else
-  staged_status=$(git -c core.quotePath=false diff --cached --name-status -- "$@")
-fi
-actual=$(printf '%s\n' "$staged_status" | paths_from_status | LC_ALL=C sort -u)
-if [ "$expected" != "$actual" ]; then
-  fail_mismatch
+if [ -f "$state/pending" ]; then
+  while IFS=$(printf '\t') read -r _pp _blob; do
+    [ -n "$_pp" ] || continue
+    record_swap "$_pp" "$_blob"
+  done < "$state/pending"
 fi
 
 git commit --file "$tmp" --only -- "$@"
 
 show_status=$(git -c core.quotePath=false --no-pager show --name-status --pretty=format: HEAD)
 actual=$(printf '%s\n' "$show_status" | paths_from_status | LC_ALL=C sort -u)
+expected=$(LC_ALL=C sort -u "$paths_tmp")
 if [ "$expected" != "$actual" ]; then
   fail_mismatch
 fi
+
+_i=1
+while [ -f "$state/blob.$_i" ]; do
+  _path=$(cat "$state/name.$_i")
+  _want=$(cat "$state/blob.$_i")
+  _got=$(git rev-parse "HEAD:$_path")
+  if [ "$_got" != "$_want" ]; then
+    die "文件 diff 与指定 hunk 不一致"
+  fi
+  _i=$((_i + 1))
+done
