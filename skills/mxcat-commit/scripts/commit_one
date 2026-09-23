@@ -1,0 +1,59 @@
+#!/bin/sh
+# 创建一条 commit。消息来自本次标准输入；路径只取 -- 之后的参数。
+set -eu
+
+usage() {
+  echo "usage: commit_one [--add] -- <path>..." >&2
+  exit 2
+}
+
+add=0
+if [ "${1:-}" = "--add" ]; then
+  add=1
+  shift
+fi
+if [ "${1:-}" != "--" ]; then
+  usage
+fi
+shift
+if [ "$#" -eq 0 ]; then
+  usage
+fi
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT INT TERM
+cat > "$tmp"
+
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+"$dir/validate" < "$tmp"
+
+if [ "$add" -eq 1 ]; then
+  git add -- "$@"
+else
+  unstaged=$(git diff -- "$@")
+  if printf '%s\n' "$unstaged" | grep -q .; then
+    echo "commit_one: 无法只提交这些路径的 staged 部分" >&2
+    exit 1
+  fi
+fi
+
+git commit --file "$tmp" --only -- "$@"
+
+expected=$(printf '%s\n' "$@" | sort -u)
+actual=$(
+  git -c core.quotePath=false --no-pager show --name-status --pretty=format: HEAD | awk '
+    BEGIN { FS = "\t" }
+    NF == 0 || $0 == "" { next }
+    $1 ~ /^R/ || $1 ~ /^C/ { print $2; print $3; next }
+    NF >= 2 { print $2 }
+  ' | sort -u
+)
+
+if [ "$expected" != "$actual" ]; then
+  echo "commit_one: 文件集合与路径参数不一致" >&2
+  echo "参数:" >&2
+  printf '%s\n' "$expected" >&2
+  echo "实际:" >&2
+  printf '%s\n' "$actual" >&2
+  exit 1
+fi
