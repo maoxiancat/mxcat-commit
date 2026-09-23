@@ -26,6 +26,62 @@ Header 中的 emoji MUST 使用 shortcode（例如 `:bug:`），MUST NOT 使用 
 - **THEN** 标题 MUST 在 subject 前包含独立的 `!` 标记
 - **AND** 标题 MUST 形如 `:emoji: (scope) ! subject`
 
+### Requirement: Scope token MUST NOT 含空白且 MUST 为单个括号
+`(scope)` 括号内 MUST NOT 包含空格或制表符。标题 MUST 只含一个 `(scope)`，MUST NOT 写成 `(auth,api)` 或其它并列。提交后标题自检 MUST 将括号内含空白的标题判为失败。
+
+#### Scenario: 括号内空白不合格
+- **WHEN** 技能生成或定稿一条提交标题
+- **THEN** `(scope)` 括号内 MUST NOT 含空白
+- **AND** 标题 MUST NOT 形如 `:sparkles: (my scope) 增加空数据占位`
+
+#### Scenario: 不得并列多个 scope
+- **WHEN** 一条 commit 覆盖多于一个模块
+- **THEN** 标题 MUST 只含一个 `(scope)`
+- **AND** 标题 MUST NOT 形如 `:sparkles: (auth,api) 增加空数据占位`
+- **AND** 技能 MUST 拆成多条 commit，或取该条的主面作为唯一 scope
+
+#### Scenario: 无空白的合法 scope 可通过自检
+- **WHEN** 标题为 `:sparkles: (charts) 增加空数据占位` 或 `:sparkles: (mxcat-commit) 增加空数据占位`
+- **THEN** 标题自检 MUST 将该项视为通过（若其它自检也通过）
+
+### Requirement: Scope MUST 按该条 commit 的主语选一个小写英文短词
+生成标题时，`scope` MUST 是一个小写英文短词。连字符 MUST 仅在源名字本身含连字符时保留（例如 skill 包名 `mxcat-commit`）。`scope` MUST 按该条 commit 的主语选择，MUST NOT 按文件路径拼接，MUST NOT 依赖允许词表：
+
+- 产品面、页面或功能 → 该面的短词（例如 `home`、`vote`、`charts`）
+- 共享层或基础设施 → 该层的短词（例如 `styles`、`i18n`、`api`）
+- 规范或流程工具 → 该工具的短词（例如 `openspec`）
+- 宿主仓库中一批 skill 快照 → `skills`
+- 只改某一个 skill → 该 skill 的包名（例如 `mxcat-commit`）
+
+看不出单一主面时，技能 MUST 拆成多条 commit，MUST NOT 使用 `misc`、`all`、`update` 或 `wip` 作为 scope。同一产品面的多条独立 commit 共用同一个 scope 是合法的。Subject 的语言 MUST NOT 改变 scope 的写法。
+
+#### Scenario: 产品面用该面短词
+- **WHEN** 该条 commit 的主语是某个产品面、页面或功能
+- **THEN** `(scope)` MUST 为该面的一个小写英文短词
+- **AND** MUST NOT 写成路径或句子
+
+#### Scenario: 共享层用该层短词
+- **WHEN** 该条 commit 的主语是共享样式、文案层、接口或工具函数，而不是某个页面
+- **THEN** `(scope)` MUST 为该层的一个小写英文短词（例如 `styles`、`i18n`、`api`、`utils`）
+
+#### Scenario: 一批 skill 快照用 skills
+- **WHEN** 该条 commit 更新宿主仓库中一批 skill 包快照
+- **THEN** `(scope)` MUST 为 `skills`
+
+#### Scenario: 只改某一个 skill 用包名
+- **WHEN** 该条 commit 只改某一个 skill 的行为或文档
+- **THEN** `(scope)` MUST 为该 skill 的包名
+
+#### Scenario: 无主面则拆批而不是编占位词
+- **WHEN** 变更跨多个无关产品面或共享层，且无法指出单一主语
+- **THEN** 技能 MUST 拆成多条 commit
+- **AND** MUST NOT 使用 `(misc)`、`(all)`、`(update)` 或 `(wip)`
+
+#### Scenario: 中文 subject 仍用英文 scope
+- **WHEN** subject 使用默认简体中文
+- **THEN** `(scope)` MUST 仍为小写英文短词
+- **AND** MUST NOT 使用中文 scope
+
 ### Requirement: Subject 与 Body 默认 MUST 使用简体中文
 在用户本轮未明确要求其他语言时，header 的 subject 与 body 条目 MUST 使用简体中文。语言偏好只影响人类描述文本，MUST NOT 改变 `:emoji:`、`(scope)`、`!` 或 `BREAKING CHANGE:` 字段名。用户本轮明确要求英文（或其他语言）时，subject 与 body MUST 改用所要求语言。
 
@@ -62,3 +118,98 @@ Header 中的 emoji MUST 使用 shortcode（例如 `:bug:`），MUST NOT 使用 
 - **WHEN** 提交包含标题与两条 body
 - **THEN** 消息 MUST 为标题、空行、再两条 bullet
 - **AND** 标题与第一条 bullet 之间 MUST 恰好一个空行
+
+### Requirement: 提交后空行自检 MUST 可判定分隔空行
+每条 `git commit` 成功后，技能 MUST 对新建 commit 的消息做可判定的空行自检，MUST NOT 仅靠打印消息或 `cat -vet` 目视。若 `git log` 的 `%B`（整段消息）在第一行之后仍有非空行，则 `%b`（标题后第一个空行之后的正文）MUST 非空；否则该项自检 MUST 失败。若第一行之后没有非空行（只有标题），该项 MUST 通过。自检失败时 MUST 停止后续预定 commit，MUST 向用户报告，MUST NOT 运行 `git push`，MUST NOT 输出成功回执，MUST NOT 自动 `reset` 已成功的 commit。该项 MUST NOT 仅因标题与正文之间存在多于一个空行、或 body 与 `BREAKING CHANGE:` 之间缺空行而失败。
+
+#### Scenario: 标题与正文粘在一起则失败
+- **WHEN** 新建 commit 的消息为标题后紧跟 body 行、中间没有空行
+- **THEN** 空行自检 MUST 将该项视为失败
+- **AND** 技能 MUST 停止后续预定 commit
+- **AND** MUST NOT 运行 `git push`
+- **AND** MUST NOT 使用成功回执开头
+
+#### Scenario: 标题、空行、正文则通过
+- **WHEN** 新建 commit 的消息为标题、一个空行、再 body
+- **THEN** 空行自检 MUST 将该项视为通过（若其它自检也通过）
+
+#### Scenario: 只有标题则通过
+- **WHEN** 新建 commit 的消息只有标题，标题之后没有非空行
+- **THEN** 空行自检 MUST 将该项视为通过（若其它自检也通过）
+
+#### Scenario: 两个空行再正文不因此失败
+- **WHEN** 新建 commit 的消息为标题、两个空行、再 body
+- **THEN** 空行自检 MUST NOT 仅因此将该项视为失败
+
+### Requirement: 常用类型 MUST 覆盖界面、格式、安全与添加依赖
+生成标题时，常用类型短表 MUST 至少包含下列 shortcode，且语义 MUST 与下表一致。`:wrench:` MUST 表示配置，MUST NOT 写成「杂项」或其它兜底语义。
+
+| Shortcode | 语义 |
+|---|---|
+| `:sparkles:` | 新功能 |
+| `:bug:` | 修复 |
+| `:lipstick:` | 界面和样式 |
+| `:art:` | 代码结构或格式 |
+| `:lock:` | 安全修复 |
+| `:heavy_plus_sign:` | 添加依赖 |
+| `:memo:` | 文档 |
+| `:recycle:` | 重构 |
+| `:zap:` | 性能 |
+| `:white_check_mark:` | 测试 |
+| `:wrench:` | 配置 |
+| `:truck:` | 移动或重命名 |
+| `:fire:` | 删除 |
+
+选词（生成时遵守；自检不验 emoji 语义）：
+
+- 界面或样式文件用 `:lipstick:`
+- 代码结构或格式用 `:art:`
+- 安全修复用 `:lock:`；普通缺陷仍用 `:bug:`
+- 添加依赖用 `:heavy_plus_sign:`
+- 配置文件用 `:wrench:`
+
+依赖的升级、降级、移除或锁版本，只改文案或字面量，以及 CI、国际化，header 的 shortcode MUST 从完整类型表选取，MUST NOT 硬套进短表。界面改动同时改到文案时，仍用 `:lipstick:`。
+
+#### Scenario: 界面改动用 lipstick
+- **WHEN** 该条 commit 的主语是界面或样式
+- **THEN** header MUST 使用 `:lipstick:`
+- **AND** MUST NOT 使用 `:sparkles:` 或 `:wrench:`
+
+#### Scenario: 代码格式用 art
+- **WHEN** 该条 commit 的主语是代码结构或格式，而不是界面
+- **THEN** header MUST 使用 `:art:`
+- **AND** MUST NOT 使用 `:lipstick:`
+
+#### Scenario: 安全修复用 lock
+- **WHEN** 该条 commit 的主语是安全修复
+- **THEN** header MUST 使用 `:lock:`
+- **AND** MUST NOT 使用 `:bug:` 或 `:wrench:`
+
+#### Scenario: 添加依赖用 heavy_plus_sign
+- **WHEN** 该条 commit 的主语是添加依赖
+- **THEN** header MUST 使用 `:heavy_plus_sign:`
+- **AND** MUST NOT 使用 `:wrench:` 或 `:sparkles:`
+
+#### Scenario: 配置仍用 wrench
+- **WHEN** 该条 commit 的主语是修改配置
+- **THEN** header MUST 使用 `:wrench:`
+- **AND** 短表对 `:wrench:` 的语义 MUST 为配置
+
+#### Scenario: 只改文案改用完整表
+- **WHEN** 该条 commit 只更新文案或字面量，没有界面或样式改动
+- **THEN** header MUST 使用完整类型表中的 `:speech_balloon:`
+- **AND** MUST NOT 使用 `:lipstick:` 或 `:sparkles:`
+
+#### Scenario: 界面同时改文案仍用 lipstick
+- **WHEN** 该条 commit 更新界面或样式，并同时改到文案
+- **THEN** header MUST 使用 `:lipstick:`
+
+#### Scenario: 依赖升级或移除改用完整表
+- **WHEN** 该条 commit 升级、降级、移除或锁定依赖版本
+- **THEN** header MUST 从完整类型表的依赖管理类型中选择
+- **AND** MUST NOT 使用 `:heavy_plus_sign:`、`:wrench:` 或 `:sparkles:`
+
+#### Scenario: CI 与国际化改用完整表
+- **WHEN** 该条 commit 的主语是 CI 或国际化
+- **THEN** header MUST 从完整类型表中选择对应 shortcode
+- **AND** MUST NOT 使用 `:wrench:` 或 `:sparkles:`
