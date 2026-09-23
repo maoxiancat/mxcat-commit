@@ -48,7 +48,7 @@ single 与 batch 都先出示预览，等人确认，再提交。确认按**本�
 
 提交或 push 成功后，按对应 guide 的回执样例汇报，不要临场改结构。同一组字段（`Commit：` / `标题：` / `变更：`，或 `分支：` / `仓库地址：`）写成 Markdown 无序列表，组内不要空行；开头句与工作区句仍是段落。
 
-确认之后，按当前 shell 创建每条 commit：sh、bash、zsh 用本技能目录的 `scripts/commit_one`，Windows PowerShell 用 `scripts/commit_one.ps1`。写法见对应 guide 第 5 步。
+确认之后，按当前 shell 创建每条 commit：sh、bash、zsh 用本技能目录的 `scripts/commit_one`，Windows PowerShell 用 `scripts/commit_one.ps1`。写法见对应 guide 第 5 步。同一文件要分属多条时，由入口按该条 hunk 提交。
 
 ## 默认结果约束
 

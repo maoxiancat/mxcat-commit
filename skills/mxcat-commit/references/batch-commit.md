@@ -60,6 +60,8 @@ git diff --cached --numstat
 
 每条 commit 记下将进入这条 commit 的路径（预览「改动部分」的仓库相对路径，也就是该条 `commit_one` 的路径参数）。不要把预览里没列出的文件塞进某条。
 
+同一个已跟踪文件可以出现在多条里。每条「改动部分」标明这一条带走的 hunk，这些 hunk 必须来自当时 `git diff HEAD` 里该文件的完整 hunk，各条之间不重叠。解释仍不逐行复述 diff。二进制、尚未进入 HEAD 的新文件，或 rename / copy 同时还要拆内容时，先停止并说明，不要退回整文件提交。
+
 若逻辑上只有一组，预览写成 `## commit 1`，仍走本文，不要改成 single。
 
 ## 3. 一次出示整单预览（此时不要提交）
@@ -139,7 +141,7 @@ git diff --cached --numstat
 对预览中的每一条，按顺序：
 
 1. 路径参数 = 该条预览「改动部分」列出的仓库相对路径。rename / delete 要把旧路径和新路径都列入。丢掉的条目即使仍 staged，也不列入剩余条的参数。脚本路径相对于本技能目录（含 `SKILL.md` 的那一层），不是目标仓库根目录。
-2. 默认整棵工作树时带 `--add`。只要暂存区时不带 `--add`，也不要自己 `git add`。这些路径上若还有未暂存改动，脚本会在提交前退出。
+2. 默认整棵工作树时带 `--add`。只要暂存区时不带 `--add`，也不要自己 `git add`。只要暂存区且路径仍有未暂存改动时，脚本提交 index 里已有的内容并留下工作区；index 与 HEAD 相同则在提交前退出。同一文件不是最后一段时，把该条 hunk 写成补丁文件（从 `git diff HEAD` 抄出的完整 hunk，不要用 `/tmp/commit_msg.txt`），调用时加上 `--hunks <file>`。最后一段若只要剩余全部，继续 `--add`，不要再带 `--hunks`。补丁对不上当前 diff 时入口会在提交前退出，不要改成整文件提交。
 3. 把消息管道到当前环境的入口，写入该条标题和正文。sh、bash、zsh 用 `scripts/commit_one`；Windows PowerShell 用 `scripts/commit_one.ps1`。每条 commit 各自一条管道，不要复用上一条的消息来源，也不要写到固定路径（包括 `/tmp/commit_msg.txt`）。不要在 PowerShell 里调用没有扩展名的 `commit_one`，也不要在 sh 里调用 `.ps1`。不要绕过入口另写 `git commit`。不要写入 `AI-Co-Authored-By:`、`Co-authored-by:`、`Jira-Refs:`。
 4. 入口非 0 即停，与 `single-commit.md` 第 6 步相同。不要另跑 header / 空行 / 页脚 / `git show` 四段命令。
 5. 通过后再处理下一条。

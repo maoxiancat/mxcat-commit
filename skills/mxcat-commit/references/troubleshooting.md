@@ -60,6 +60,23 @@ sh、bash、zsh 的入口是 `scripts/commit_one`。Windows PowerShell 的入口
 
 常见原因是路径参数和该条预览「改动部分」不一致。
 
+## 部分提交失败
+
+同一文件按 hunk 提交时，补丁对不上当前 diff、路径是二进制、是 rename / copy 同时还要拆内容，或路径尚未进入 HEAD，`commit_one` 在创建 commit 之前退出。工作区应仍是调用前的内容：
+
+- 停止后续提交，报告脚本错误。
+- 不要改成不带 `--hunks` 的整文件提交。
+- 不要 `git reset`：这次没有新 commit。
+- 不要把补丁或消息写到 `/tmp/commit_msg.txt`。
+
+提交已经成功，但该文件的 diff 对不上这次指定的 hunk 时，这条 commit 已经存在，脚本不会 reset。工作区应已恢复为调用前的内容：
+
+- 停止后续提交。
+- **不要**运行 `git push`。
+- **不要**用成功回执开头。
+- 不要自动 reset。已成功的 commit 保留。
+- 仅当用户明确要求撤回这一条时，才执行 `git reset --soft HEAD~1`，然后回到对应 guide 重出预览。
+
 ## 自检失败：出现禁止页脚
 
 `commit_one` 因 `AI-Co-Authored-By:`、`Co-authored-by:`、`Co-Authored-By:` 或 `Jira-Refs:` 退出时，该条 commit 还没创建。行首有空格或制表符也同样拒绝：
