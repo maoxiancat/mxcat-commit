@@ -1,0 +1,191 @@
+#!/bin/sh
+# 覆盖 validate 的消息判定，以及 commit_one 的路径预检。
+set -eu
+
+skill=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+validate=$skill/scripts/validate
+commit_one=$skill/scripts/commit_one
+
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+expect_validate() {
+  name=$1
+  want=$2
+  set +e
+  "$validate" >/dev/null
+  code=$?
+  set -e
+  if [ "$code" -ne "$want" ]; then
+    fail "$name: exit $code, want $want"
+  fi
+  echo "ok $name"
+}
+
+expect_validate "粘连且后面另有空行" 1 <<'EOF'
+:bug: (charts) ! 拒绝重复导出
+- 重复导出请求改为立即失败
+
+BREAKING CHANGE: 重复导出现在会直接报错
+EOF
+
+expect_validate "只有标题" 0 <<'EOF'
+:bug: (charts) 修复空状态
+EOF
+
+expect_validate "标题、空行、正文" 0 <<'EOF'
+:bug: (charts) 修复空状态
+
+- 空状态不再抛出
+EOF
+
+expect_validate "两个空行再正文" 0 <<'EOF'
+:bug: (charts) 修复空状态
+
+
+- 空状态不再抛出
+EOF
+
+expect_validate "正文后紧跟 BREAKING CHANGE" 0 <<'EOF'
+:bug: (charts) ! 拒绝重复导出
+
+- 重复导出请求改为立即失败
+BREAKING CHANGE: 重复导出现在会直接报错
+EOF
+
+expect_validate "行首空白的禁止页脚" 1 <<'EOF'
+:bug: (charts) 修复空状态
+
+- 空状态不再抛出
+  Co-authored-by: someone <a@example.com>
+EOF
+
+expect_validate "并列 scope" 1 <<'EOF'
+:sparkles: (auth,api) 增加空数据占位
+EOF
+
+expect_validate "charts" 0 <<'EOF'
+:sparkles: (charts) 增加空数据占位
+EOF
+
+expect_validate "mxcat-commit" 0 <<'EOF'
+:sparkles: (mxcat-commit) 增加空数据占位
+EOF
+
+export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com
+export GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
+
+repo=$(mktemp -d)
+trap 'rm -rf "$repo"' EXIT
+git -C "$repo" init -q
+printf '%s\n' 'base' > "$repo/keep.txt"
+git -C "$repo" add keep.txt
+git -C "$repo" commit -q -m init
+
+head_now() {
+  git -C "$repo" rev-parse HEAD
+}
+
+msg=$(printf '%s\n' ':bug: (charts) 修复占位')
+
+mkdir -p "$repo/src"
+printf '%s\n' 'foo' > "$repo/src/Foo.txt"
+before=$(head_now)
+printf '%s\n' "$msg" | (cd "$repo" && "$commit_one" --add -- ./src/Foo.txt)
+after=$(head_now)
+if [ "$before" = "$after" ]; then
+  fail "./ 前缀没有创建 commit"
+fi
+shown=$(git -C "$repo" -c core.quotePath=false show --name-only --pretty=format: HEAD)
+if [ "$shown" != "src/Foo.txt" ]; then
+  fail "./ 前缀实际路径是: $shown"
+fi
+echo "ok ./ 前缀"
+
+printf '%s\n' 'bar' > "$repo/src/Bar.txt"
+before=$(head_now)
+printf '%s\n' "$msg" | (cd "$repo/src" && "$commit_one" --add -- Bar.txt)
+after=$(head_now)
+if [ "$before" = "$after" ]; then
+  fail "子目录相对路径没有创建 commit"
+fi
+shown=$(git -C "$repo" -c core.quotePath=false show --name-only --pretty=format: HEAD)
+if [ "$shown" != "src/Bar.txt" ]; then
+  fail "子目录相对路径实际是: $shown"
+fi
+echo "ok 非仓库根目录"
+
+mkdir -p "$repo/dir"
+printf '%s\n' 'nested' > "$repo/dir/a.txt"
+before=$(head_now)
+set +e
+printf '%s\n' "$msg" | (cd "$repo" && "$commit_one" --add -- dir)
+code=$?
+set -e
+after=$(head_now)
+if [ "$code" -eq 0 ]; then
+  fail "目录参数不应成功"
+fi
+if [ "$before" != "$after" ]; then
+  fail "目录参数创建了 commit"
+fi
+echo "ok 目录参数"
+staged_after_dir=$(git -C "$repo" diff --cached --name-only)
+if [ -n "$staged_after_dir" ]; then
+  fail "目录参数把文件放进了暂存区: $staged_after_dir"
+fi
+echo "ok 目录参数不改暂存区"
+
+printf '%s\n' 'absolute' > "$repo/src/Foo.txt"
+printf '%s\n' "$msg" | (cd "$repo" && "$commit_one" --add -- "$repo/src/Foo.txt")
+shown=$(git -C "$repo" -c core.quotePath=false show --name-only --pretty=format: HEAD)
+if [ "$shown" != "src/Foo.txt" ]; then
+  fail "绝对路径实际是: $shown"
+fi
+echo "ok 绝对路径"
+
+printf '%s\n' 'locked' > "$repo/src/Bar.txt"
+printf '%s\n' 'other' > "$repo/other.txt"
+git -C "$repo" add other.txt
+before=$(head_now)
+printf '%s\n' "$msg" | (cd "$repo" && "$commit_one" --add -- src/Bar.txt)
+shown=$(git -C "$repo" -c core.quotePath=false show --name-only --pretty=format: HEAD)
+left=$(git -C "$repo" diff --cached --name-only)
+if [ "$(head_now)" = "$before" ] || [ "$shown" != "src/Bar.txt" ] || [ "$left" != "other.txt" ]; then
+  fail "路径锁 shown=$shown left=$left"
+fi
+echo "ok 其它已暂存路径留在 index"
+
+printf '%s\n' 'changed' > "$repo/src/Foo.txt"
+before=$(head_now)
+set +e
+printf '%s\n' "$msg" | (cd "$repo" && "$commit_one" --add -- src/Foo.txt keep.txt)
+code=$?
+set -e
+after=$(head_now)
+if [ "$code" -eq 0 ]; then
+  fail "夹带未改动文件不应成功"
+fi
+if [ "$before" != "$after" ]; then
+  fail "夹带未改动文件创建了 commit"
+fi
+echo "ok 未改动文件"
+
+printf '%s\n' 'old' > "$repo/old.txt"
+git -C "$repo" add old.txt
+git -C "$repo" commit -q -m old
+git -C "$repo" mv old.txt new.txt
+before=$(head_now)
+printf '%s\n' "$msg" | (cd "$repo" && "$commit_one" -- old.txt new.txt)
+after=$(head_now)
+if [ "$before" = "$after" ]; then
+  fail "重命名预检拒绝了同时给出的旧路径和新路径"
+fi
+shown=$(git -C "$repo" -c core.quotePath=false show --name-status --pretty=format: HEAD | awk -F '\t' 'NF>=2 { print }')
+printf '%s\n' "$shown" | grep -q old.txt || fail "重命名结果缺少旧路径: $shown"
+printf '%s\n' "$shown" | grep -q new.txt || fail "重命名结果缺少新路径: $shown"
+echo "ok 重命名"
+
+echo "all passed"

@@ -16,7 +16,7 @@ sh、bash、zsh 的入口是 `scripts/commit_one`。Windows PowerShell 的入口
 
 ## 自检失败：标题不合规
 
-`commit_one` 因 header 不合格退出时，该条 commit 还没创建。header 对不上 `:emoji: (scope) subject`（或缺 `(scope)`、括号内空白、写成 Unicode emoji、写成 `feat(scope):`）都属于这类。
+`commit_one` 因 header 不合格退出时，该条 commit 还没创建。header 对不上 `:emoji: (scope) subject`（或缺 `(scope)`、括号内空白、并列 scope 如 `(auth,api)`、括号内不是单个小写 token、写成 Unicode emoji、写成 `feat(scope):`）都属于这类。
 
 - 停止后续提交。
 - 向用户报告脚本错误。
@@ -27,7 +27,7 @@ sh、bash、zsh 的入口是 `scripts/commit_one`。Windows PowerShell 的入口
 
 ## 自检失败：空行丢失
 
-标题后还有正文，但标题与正文粘在一起、中间没有空行时，`commit_one` 会在创建 commit 之前退出。多一个空行，或 body 与 `BREAKING CHANGE:` 之间缺空行，不会仅因此被拒绝。生成时 header 与 body 之间、body 与 `BREAKING CHANGE:` 之间仍要恰好一个空行。
+标题后还有正文，但标题与正文粘在一起、中间没有空行时，`commit_one` 会在创建 commit 之前退出。后面另有空行（例如 `BREAKING CHANGE:` 之前）也不能把这次粘连洗白。多一个空行，或 body 与 `BREAKING CHANGE:` 之间缺空行，不会仅因此被拒绝。生成时 header 与 body 之间、body 与 `BREAKING CHANGE:` 之间仍要恰好一个空行。
 
 处理：
 
@@ -37,7 +37,17 @@ sh、bash、zsh 的入口是 `scripts/commit_one`。Windows PowerShell 的入口
 
 ## 自检失败：文件集合与预览不一致
 
-`commit_one` 报告文件集合与路径参数不一致时，该条 commit 已经存在，脚本不会 reset：
+目录参数，或参数里夹了相对 `HEAD` 没有差异、因而不会进入这次 commit 的路径时，`commit_one` 在 `git commit` 之前退出，这条 commit 还没创建：
+
+- 停止后续提交。
+- 向用户报告脚本错误。
+- 不要 `git reset`：这次没有新 commit。
+- 不要绕过 `scripts/commit_one` 另写 `git commit`，也不要把消息写到 `/tmp/commit_msg.txt`。
+- 改成这次真正有差异的文件路径后，回到对应 guide 重跑。
+
+`./` 前缀，或在非仓库根目录传入相对当前目录的路径，收成同一仓库相对路径后，对照可以通过。
+
+提交已经成功，但规范化之后文件集合仍对不上时，该条 commit 已经存在，脚本不会 reset：
 
 - 停止后续提交。
 - 向用户报告脚本打印的参数路径与实际路径。
@@ -52,7 +62,7 @@ sh、bash、zsh 的入口是 `scripts/commit_one`。Windows PowerShell 的入口
 
 ## 自检失败：出现禁止页脚
 
-`commit_one` 因 `AI-Co-Authored-By:`、`Co-authored-by:`、`Co-Authored-By:` 或 `Jira-Refs:` 退出时，该条 commit 还没创建：
+`commit_one` 因 `AI-Co-Authored-By:`、`Co-authored-by:`、`Co-Authored-By:` 或 `Jira-Refs:` 退出时，该条 commit 还没创建。行首有空格或制表符也同样拒绝：
 
 - 停止并报告这些行。
 - **不要**改成补上一行 AI trailer。

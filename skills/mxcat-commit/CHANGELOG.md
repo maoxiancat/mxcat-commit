@@ -1,5 +1,10 @@
 # 更新文档
 
+## 1.3.1（2026-09-23）
+
+- :bug: (mxcat-commit) 标题与正文粘连、行首空白的禁止页脚和并列 scope 会在写入 commit 之前被拒绝
+- :bug: (mxcat-commit) 同一文件的不同路径写法不再在提交后误报；目录和未改动路径在创建 commit 之前停止
+
 ## 1.3.0（2026-09-23）
 
 - :sparkles: (mxcat-commit) Windows PowerShell 改用 commit_one.ps1 提交，sh 环境仍用 commit_one

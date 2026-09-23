@@ -7,6 +7,108 @@ usage() {
   exit 2
 }
 
+# 把仓库相对路径折成不含 . / .. 的形式。逃出仓库根时返回 1。
+collapse_repo_path() {
+  _rest=$1
+  _acc=
+  while [ -n "$_rest" ]; do
+    _seg=${_rest%%/*}
+    case $_rest in
+      */*) _rest=${_rest#*/} ;;
+      *) _rest= ;;
+    esac
+    case $_seg in
+      ''|.) ;;
+      ..)
+        case $_acc in
+          '') return 1 ;;
+          */*) _acc=${_acc%/*} ;;
+          *) _acc= ;;
+        esac
+        ;;
+      *)
+        if [ -z "$_acc" ]; then
+          _acc=$_seg
+        else
+          _acc=$_acc/$_seg
+        fi
+        ;;
+    esac
+  done
+  printf '%s\n' "$_acc"
+}
+
+# 参数收成仓库相对路径。目录、仓库外路径写到 stderr 并返回 1。
+normalize_arg() {
+  _orig=$1
+  _p=$1
+  if [ -d "$_p" ]; then
+    echo "commit_one: 路径是目录: $_orig" >&2
+    return 1
+  fi
+  while :; do
+    case $_p in
+      ./*) _p=${_p#./} ;;
+      *) break ;;
+    esac
+  done
+  case $_p in
+    /*)
+      _parent=$(dirname -- "$_p")
+      _base=$(basename -- "$_p")
+      if _parent_phys=$(CDPATH= cd -P -- "$_parent" 2>/dev/null && pwd); then
+        _phys="$_parent_phys/$_base"
+      else
+        _phys=$_p
+      fi
+      case $_phys in
+        "$repo_phys"/*) _p=${_phys#"$repo_phys"/} ;;
+        "$repo_root"/*) _p=${_phys#"$repo_root"/} ;;
+        *)
+          echo "commit_one: 路径不在仓库内: $_orig" >&2
+          return 1
+          ;;
+      esac
+      ;;
+    *)
+      _p="${repo_prefix}${_p}"
+      ;;
+  esac
+  while :; do
+    case $_p in
+      */) _p=${_p%/} ;;
+      *) break ;;
+    esac
+  done
+  if ! _out=$(collapse_repo_path "$_p"); then
+    echo "commit_one: 路径不在仓库内: $_orig" >&2
+    return 1
+  fi
+  if [ -z "$_out" ]; then
+    echo "commit_one: 路径是目录: $_orig" >&2
+    return 1
+  fi
+  printf '%s\n' "$_out"
+}
+
+paths_from_status() {
+  awk '
+    BEGIN { FS = "\t" }
+    NF == 0 || $0 == "" { next }
+    $1 ~ /^R/ || $1 ~ /^C/ { print $2; print $3; next }
+    NF >= 2 { print $2 }
+  '
+}
+
+fail_mismatch() {
+  echo "commit_one: 文件集合与路径参数不一致" >&2
+  echo "参数:" >&2
+  printf '%s\n' "$expected" >&2
+  echo "实际:" >&2
+  printf '%s\n' "$actual" >&2
+  exit 1
+}
+
 add=0
 if [ "${1:-}" = "--add" ]; then
   add=1
@@ -21,11 +123,21 @@ if [ "$#" -eq 0 ]; then
 fi
 
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT INT TERM
+paths_tmp=$(mktemp)
+trap 'rm -f "$tmp" "$paths_tmp"' EXIT INT TERM
 cat > "$tmp"
 
 dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 "$dir/validate" < "$tmp"
+
+repo_root=$(git rev-parse --show-toplevel)
+repo_phys=$(CDPATH= cd -P -- "$repo_root" && pwd)
+repo_prefix=$(git rev-parse --show-prefix)
+: > "$paths_tmp"
+for _arg in "$@"; do
+  normalize_arg "$_arg" >> "$paths_tmp"
+done
+expected=$(LC_ALL=C sort -u "$paths_tmp")
 
 if [ "$add" -eq 1 ]; then
   git add -- "$@"
@@ -37,23 +149,20 @@ else
   fi
 fi
 
+if git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+  staged_status=$(git -c core.quotePath=false diff --cached --name-status HEAD -- "$@")
+else
+  staged_status=$(git -c core.quotePath=false diff --cached --name-status -- "$@")
+fi
+actual=$(printf '%s\n' "$staged_status" | paths_from_status | LC_ALL=C sort -u)
+if [ "$expected" != "$actual" ]; then
+  fail_mismatch
+fi
+
 git commit --file "$tmp" --only -- "$@"
 
-expected=$(printf '%s\n' "$@" | sort -u)
-actual=$(
-  git -c core.quotePath=false --no-pager show --name-status --pretty=format: HEAD | awk '
-    BEGIN { FS = "\t" }
-    NF == 0 || $0 == "" { next }
-    $1 ~ /^R/ || $1 ~ /^C/ { print $2; print $3; next }
-    NF >= 2 { print $2 }
-  ' | sort -u
-)
-
+show_status=$(git -c core.quotePath=false --no-pager show --name-status --pretty=format: HEAD)
+actual=$(printf '%s\n' "$show_status" | paths_from_status | LC_ALL=C sort -u)
 if [ "$expected" != "$actual" ]; then
-  echo "commit_one: 文件集合与路径参数不一致" >&2
-  echo "参数:" >&2
-  printf '%s\n' "$expected" >&2
-  echo "实际:" >&2
-  printf '%s\n' "$actual" >&2
-  exit 1
+  fail_mismatch
 fi

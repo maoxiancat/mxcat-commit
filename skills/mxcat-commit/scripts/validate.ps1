@@ -7,8 +7,7 @@ function Test-CommitMessage {
     $headerOk = $false
     $lineNo = 0
     $seenBlank = $false
-    $bodyNonempty = $false
-    $afterNonempty = $false
+    $missingSep = $false
     $forbidden = $false
 
     $lines = @([regex]::Split($Message, "\r?\n"))
@@ -23,22 +22,16 @@ function Test-CommitMessage {
     foreach ($line in @($lines)) {
         $lineNo++
         if ($lineNo -eq 1) {
-            if ($line -cmatch '^:[a-z0-9_+-]+: \([^)\s]+\)( !)? .+') {
+            if ($line -cmatch '^:[a-z0-9_+-]+: \([a-z0-9]+(-[a-z0-9]+)*\)( !)? .+') {
                 $headerOk = $true
             }
-        } else {
-            if ($line -cmatch '.') {
-                $afterNonempty = $true
-            }
-            if (-not $seenBlank) {
-                if ($line -eq '') {
-                    $seenBlank = $true
-                }
-            } elseif ($line -cmatch '.') {
-                $bodyNonempty = $true
-            }
+        } elseif ($line -eq '') {
+            $seenBlank = $true
+        } elseif (-not $seenBlank) {
+            $missingSep = $true
         }
-        if ($line.ToLowerInvariant() -cmatch '^(ai-co-authored-by:|co-authored-by:|jira-refs:)') {
+        $trimmed = $line.TrimStart(' ', "`t")
+        if ($trimmed.ToLowerInvariant() -cmatch '^(ai-co-authored-by:|co-authored-by:|jira-refs:)') {
             $forbidden = $true
         }
     }
@@ -52,7 +45,7 @@ function Test-CommitMessage {
         [Console]::Error.WriteLine('validate: 含有禁止页脚')
         $code = 1
     }
-    if ($afterNonempty -and -not $bodyNonempty) {
+    if ($missingSep) {
         [Console]::Error.WriteLine('validate: 标题与正文之间缺少空行')
         $code = 1
     }
