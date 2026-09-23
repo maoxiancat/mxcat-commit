@@ -14,8 +14,7 @@
 - 以及同等只读查询
 
 写入（有门禁）：
-- `git add --` 该条预览路径（默认整棵工作树；只要暂存区则不要 add）
-- `git commit --file` + `--only --` 同一份路径（预览已确认）
+- 本技能目录的提交入口（预览已确认）。当前 shell 是 sh、bash 或 zsh 时用 `scripts/commit_one`；当前 shell 是 Windows PowerShell 时用 `scripts/commit_one.ps1`。默认整棵工作树时带 `--add`；只要暂存区时不带 `--add`
 - `git push`（仅预览后「提交并 push」且全部预定 commit 成功，或提交成功后再说 push；不要 `--force`，没有上游不要擅自 `-u`）
 
 禁止：
@@ -24,6 +23,7 @@
 - 丢掉的预览文件 `git restore` / `checkout` / `reset`
 - 自动 `git reset` 已成功的 batch 条目
 - 未确认 `git commit --amend`
+- 绕过当前环境的入口直接 `git commit`
 - 独立 index、shadow worktree、rebase、stash
 
 确认前禁止 `git commit`。该次回复只批准提交、未要求 push 时，不要运行 `git push`。提交成功后用户再说「帮我 push」「推一下」或 `git push`，可以对当前上游再推一次。
@@ -118,23 +118,32 @@ git diff --cached --numstat
 
 ## 5. 确认后执行提交
 
-推荐 `printf` 管道到 `git commit --file -`，避免空行丢失。不要把消息写到固定路径。不要写入 `AI-Co-Authored-By:`、`Co-authored-by:`、`Jira-Refs:`。
+每条 commit 只经当前环境的入口创建：sh、bash、zsh 用本技能目录的 `scripts/commit_one`；Windows PowerShell 用 `scripts/commit_one.ps1`。不要在 PowerShell 里调用没有扩展名的 `commit_one`，也不要在 sh 里调用 `.ps1`。消息与这一次调用是同一条管道，空行仍要显式写出来。不要把消息写到固定路径（包括 `/tmp/commit_msg.txt`）。不要绕过入口另写 `git commit`。不要写入 `AI-Co-Authored-By:`、`Co-authored-by:`、`Jira-Refs:`。
 
-锁路径 = 该条预览「改动部分」列出的仓库相对路径（跳过预览时，等于该条实际要提交的路径）。rename / delete 要把预览里的旧路径和新路径都列入。`git commit --only --` 只提交这些路径；其它已暂存文件不进入这次 commit，提交后仍留在 index。
+路径参数等于该条预览「改动部分」列出的仓库相对路径（跳过预览时，等于该条实际要提交的路径）。rename / delete 要把预览里的旧路径和新路径都列入。脚本只用这些路径做 `git commit --only`；其它已暂存文件不进入这次 commit，提交后仍留在 index。
 
-默认整棵工作树时，先 `git add --` 同一份路径（untracked 必须先被认识）。用户只要暂存区时，不要 add。只要暂存区时，先对这些路径跑 `git diff`：非空则停止并说明无法只提交 staged hunk，不要 `git add`，也不要 `git commit --only`（它吃的是工作区）。
+脚本路径相对于本技能目录（含 `SKILL.md` 的那一层），不是目标仓库根目录。默认整棵工作树时带 `--add`。用户只要暂存区时不要带 `--add`，也不要自己 `git add`。这些路径上若还有未暂存改动，脚本会在提交前退出。
 
 ```bash
-git add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
-
 printf '%s\n' \
 ':sparkles: (charts) 增加空数据占位' \
 '' \
 '- 折线图无数据时展示占位图' \
 '- 导出入口改为禁用而不是报错' \
-| git commit --file - --only -- \
+| scripts/commit_one --add -- \
   src/charts/EmptyState.tsx \
   src/charts/ExportButton.tsx
+```
+
+Windows PowerShell 用同一段消息，管道给 `scripts/commit_one.ps1`：
+
+```powershell
+@'
+:sparkles: (charts) 增加空数据占位
+
+- 折线图无数据时展示占位图
+- 导出入口改为禁用而不是报错
+'@ | powershell -NoProfile -File scripts/commit_one.ps1 --add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
 ```
 
 若有 `BREAKING CHANGE:`，标题用 `:emoji: (scope) ! subject`，body 与 footer 之间留一个空行：
@@ -146,9 +155,11 @@ printf '%s\n' \
 '- 重复导出请求改为立即失败' \
 '' \
 'BREAKING CHANGE: 重复导出现在会直接报错' \
-| git commit --file - --only -- \
+| scripts/commit_one --add -- \
   src/charts/ExportButton.tsx
 ```
+
+PowerShell 把上面同一段消息管道给 `scripts/commit_one.ps1`，参数同样是 `--add --` 与这些路径。
 
 Body 含反引号时尤其不要改用多个 `-m`。
 
@@ -156,39 +167,9 @@ Body 含反引号时尤其不要改用多个 `-m`。
 
 ## 6. 提交后自检
 
-校验 header（shortcode + **必写** scope）：
+`commit_one`（PowerShell 下是 `commit_one.ps1`）退出非 0 即自检失败。header、分隔空行和禁止页脚在创建 commit 之前就会拒绝，此时没有新的 commit。路径对照失败时，该条 commit 已经存在，脚本不会 reset。
 
-```bash
-git log -1 --pretty=%B | head -n 1 | grep -Eq '^:[a-z0-9_+-]+: \([^)\s]+\)( !)? .+'
-```
-
-检查空行（`%B` 去掉第一行后还有非空行时，`%b` 必须非空；必须带 `else`，不要收成 `&& … || echo FAIL`）：
-
-```bash
-if git log -1 --pretty=%B | tail -n +2 | grep -q .; then
-  git log -1 --pretty=%b | grep -q . && echo OK || echo FAIL
-else
-  echo OK
-fi
-```
-
-确认没有禁止的页脚：
-
-```bash
-git log -1 --pretty=%B | grep -Ei '^(AI-Co-Authored-By:|Co-authored-by:|Co-Authored-By:|Jira-Refs:)' && echo FAIL || echo OK
-```
-
-对照该条预览路径（rename 用 `--name-status`，看旧路径与新路径是否都在）：
-
-```bash
-git show --name-only --pretty=format: HEAD
-```
-
-列出的路径必须等于该条预览「改动部分」的仓库相对路径（跳过预览时，等于该条实际要提交的路径）。多了、少了或对不上都算失败。
-
-再看 subject / body 是否仍是本次语言（默认中文）。不要在未确认时 `git commit --amend`。
-
-自检失败则停止并报告，不要输出第 7 步成功回执；恢复动作见 `troubleshooting.md`。自检通过后输出第 7 步回执。
+自检失败则停止并报告脚本的错误输出，不要输出第 7 步成功回执，也不要另跑 header / 空行 / 页脚 / `git show` 四段命令。不要绕过当前环境的入口另写 `git commit`。恢复动作见 `troubleshooting.md`。自检通过后，再看 subject / body 是否仍是本次语言（默认中文）。不要在未确认时 `git commit --amend`。通过后输出第 7 步回执。
 
 ## 7. 成功回执
 

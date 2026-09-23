@@ -2,6 +2,8 @@
 
 仅在自检失败、hook 失败、消息空行不对、文件集合与预览不一致、push 无上游或 push 失败、或丢掉预览后没有剩余条目时读取本文。不要把排查步骤提前写进 `SKILL.md`。
 
+sh、bash、zsh 的入口是 `scripts/commit_one`。Windows PowerShell 的入口是 `scripts/commit_one.ps1`。下文的 `commit_one` 指当前环境的那一个。
+
 不要自动 `git reset` 已经成功的 batch 条目。仅当用户明确要求撤回已成功的 commit 时，才允许 `git reset --soft`；不要从常规流程抄过来。不要补写或「修好」`AI-Co-Authored-By:`。用户不要提交某一预览条目时，不要对这些文件 `git restore` / `checkout` / `reset`。中途失败、无上游、push 失败时，不要用「提交已完成。」「已提交并推送到 GitHub。」或「已推送到 GitHub。」开头。
 
 ## 未预览就 commit 或 push
@@ -14,55 +16,54 @@
 
 ## 自检失败：标题不合规
 
-提交后 header 对不上 `:emoji: (scope) subject`（或缺 `(scope)`、括号内空白、写成 Unicode emoji、写成 `feat(scope):`）时：
+`commit_one` 因 header 不合格退出时，该条 commit 还没创建。header 对不上 `:emoji: (scope) subject`（或缺 `(scope)`、括号内空白、写成 Unicode emoji、写成 `feat(scope):`）都属于这类。
 
 - 停止后续提交。
-- 向用户报告失败项与 `git log -1 --pretty=%B` 的实际标题。
-- 不要在未确认时 `git commit --amend`。
-- 仅当用户明确要求撤回这一条时，才执行 `git reset --soft HEAD~1`，然后回到 `single-commit.md` 或 `batch-commit.md` 重出预览。
+- 向用户报告脚本错误。
+- 不要绕过 `scripts/commit_one` 另写 `git commit`。
+- 不要把消息写到固定路径（包括 `/tmp/commit_msg.txt`）。
+- 不要 `git reset`：这次没有新 commit。
+- 回到对应 guide，按已确认预览重跑 `commit_one`。
 
 ## 自检失败：空行丢失
 
-header 与 body 之间、body 与 `BREAKING CHANGE:` 之间必须恰好一个空行。空行被吃掉时，多半是用了多个 `-m` 或未走 `printf` + `--file`。自检打印 `FAIL` 时按本节处理。
+标题后还有正文，但标题与正文粘在一起、中间没有空行时，`commit_one` 会在创建 commit 之前退出。多一个空行，或 body 与 `BREAKING CHANGE:` 之间缺空行，不会仅因此被拒绝。生成时 header 与 body 之间、body 与 `BREAKING CHANGE:` 之间仍要恰好一个空行。
 
 处理：
 
-1. 停止后续提交，报告哪一条空行不对。
-2. 不要自动 reset。用户确认撤回这一条后，再用：
-
-```bash
-git reset --soft HEAD~1
-```
-
-3. 回到对应 guide，用 `printf` 管道到 `git commit --file -` 按已确认预览重写消息。不要把消息写到固定路径（包括 `/tmp/commit_msg.txt`）。Body 含反引号时尤其不要改回多个 `-m`。
+1. 停止后续提交，报告脚本错误。
+2. 不要 `git reset`：这次没有新 commit。
+3. 回到对应 guide，用 `printf` 管道到 `scripts/commit_one` 重跑。不要把消息写到固定路径（包括 `/tmp/commit_msg.txt`）。不要绕过脚本另写 `git commit`。Body 含反引号时尤其不要改用多个 `-m`。
 
 ## 自检失败：文件集合与预览不一致
 
-`git show --name-only`（rename 用 `--name-status`）列出的路径对不上该条预览「改动部分」时：
+`commit_one` 报告文件集合与路径参数不一致时，该条 commit 已经存在，脚本不会 reset：
 
 - 停止后续提交。
-- 向用户报告该条预览路径与 `git show` 的实际路径。
+- 向用户报告脚本打印的参数路径与实际路径。
 - **不要**运行 `git push`。
 - **不要**用成功回执开头。
 - 不要自动 reset。已成功的 commit 保留。
 - 不要在未确认时 `git commit --amend`。
+- 不要绕过 `scripts/commit_one` 另写 `git commit`，也不要把消息写到 `/tmp/commit_msg.txt`。
 - 仅当用户明确要求撤回这一条时，才执行 `git reset --soft HEAD~1`，然后回到对应 guide 重出预览。
 
-常见原因是漏写 `git commit --only --`，把 index 里其它已暂存文件带进了这次 commit。
+常见原因是路径参数和该条预览「改动部分」不一致。
 
 ## 自检失败：出现禁止页脚
 
-最终消息里出现 `AI-Co-Authored-By:`、`Co-authored-by:`、`Co-Authored-By:` 或 `Jira-Refs:` 时：
+`commit_one` 因 `AI-Co-Authored-By:`、`Co-authored-by:`、`Co-Authored-By:` 或 `Jira-Refs:` 退出时，该条 commit 还没创建：
 
 - 停止并报告这些行。
 - **不要**改成补上一行 AI trailer。
-- 用户确认后，才 amend 或 `git reset --soft HEAD~1` 去掉这些行，再按 `commit-convention.md` 重写。
+- 不要 `git reset`，不要绕过脚本另写 `git commit`，不要把消息写到 `/tmp/commit_msg.txt`。
+- 回到对应 guide，去掉这些行后重跑 `commit_one`。
 
-若 hook / IDE 额外注入了别的 trailer（例如 `Made-with:`），同样先报告，问用户是否保留；未确认不要改历史。
+若 hook / IDE 在提交时额外注入了别的 trailer（例如 `Made-with:`），commit 已经存在。同样先报告，问用户是否保留；未确认不要改历史。用户确认后，才 `git reset --soft HEAD~1`，再经 `commit_one` 重写。
 
 ## Hook 或 lint-staged 失败
 
-`git commit` 因 hook 失败时：
+`commit_one` 因 hook 失败时：
 
 - **不要**继续创建后续预览中的 commit。
 - **不要**假装整单已完成。

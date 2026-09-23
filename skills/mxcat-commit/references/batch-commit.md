@@ -14,8 +14,7 @@
 - 以及同等只读查询
 
 写入（有门禁）：
-- `git add --` 该条预览路径（默认整棵工作树；只要暂存区则不要 add）
-- `git commit --file` + `--only --` 同一份路径（预览已确认）
+- 本技能目录的提交入口（预览已确认）。当前 shell 是 sh、bash 或 zsh 时用 `scripts/commit_one`；当前 shell 是 Windows PowerShell 时用 `scripts/commit_one.ps1`。默认整棵工作树时带 `--add`；只要暂存区时不带 `--add`
 - `git push`（仅预览后「提交并 push」且全部预定 commit 成功，或提交成功后再说 push；不要 `--force`，没有上游不要擅自 `-u`）
 
 禁止：
@@ -24,6 +23,7 @@
 - 丢掉的预览文件 `git restore` / `checkout` / `reset`
 - 自动 `git reset` 已成功的 batch 条目
 - 未确认 `git commit --amend`
+- 绕过当前环境的入口直接 `git commit`
 - 独立 index、shadow worktree、rebase、stash
 
 确认整单之前禁止 `git commit`。该次回复只批准提交、未要求 push 时，不要运行 `git push`。
@@ -58,7 +58,7 @@ git diff --cached --numstat
 
 `git diff --numstat`（以及 `--cached`）两列都是 `-` 的 binary，默认不与功能文件同条，解释须点名这是二进制。用户明确要求合并或合为一条时允许混入。
 
-每条 commit 记下将进入这条 commit 的路径（预览「改动部分」的仓库相对路径；`git add --` 与 `--only --` 共用）。不要把预览里没列出的文件塞进某条。
+每条 commit 记下将进入这条 commit 的路径（预览「改动部分」的仓库相对路径，也就是该条 `commit_one` 的路径参数）。不要把预览里没列出的文件塞进某条。
 
 若逻辑上只有一组，预览写成 `## commit 1`，仍走本文，不要改成 single。
 
@@ -138,23 +138,32 @@ git diff --cached --numstat
 
 对预览中的每一条，按顺序：
 
-1. 锁路径 = 该条预览「改动部分」列出的仓库相对路径。rename / delete 要把旧路径和新路径都列入。丢掉的条目即使仍 staged，也不列入剩余条的 `--only`。
-2. 默认整棵工作树时，`git add --` 该条路径（只要暂存区时不要 add）。只要暂存区时，先对这些路径跑 `git diff`：非空则停止并说明无法只提交 staged hunk，不要 `git add`，也不要 `git commit --only`。
-3. `printf` 管道到 `git commit --file -` + `--only --` 同一份路径，写入该条标题和正文。每条 commit 各自一条管道，不要复用上一条的消息来源，也不要写到固定路径。不要写入 `AI-Co-Authored-By:`、`Co-authored-by:`、`Jira-Refs:`。
-4. 做与 `single-commit.md` 相同的自检（header / 空行 / 禁页脚 / 文件集合对照预览路径）。
+1. 路径参数 = 该条预览「改动部分」列出的仓库相对路径。rename / delete 要把旧路径和新路径都列入。丢掉的条目即使仍 staged，也不列入剩余条的参数。脚本路径相对于本技能目录（含 `SKILL.md` 的那一层），不是目标仓库根目录。
+2. 默认整棵工作树时带 `--add`。只要暂存区时不带 `--add`，也不要自己 `git add`。这些路径上若还有未暂存改动，脚本会在提交前退出。
+3. 把消息管道到当前环境的入口，写入该条标题和正文。sh、bash、zsh 用 `scripts/commit_one`；Windows PowerShell 用 `scripts/commit_one.ps1`。每条 commit 各自一条管道，不要复用上一条的消息来源，也不要写到固定路径（包括 `/tmp/commit_msg.txt`）。不要在 PowerShell 里调用没有扩展名的 `commit_one`，也不要在 sh 里调用 `.ps1`。不要绕过入口另写 `git commit`。不要写入 `AI-Co-Authored-By:`、`Co-authored-by:`、`Jira-Refs:`。
+4. 入口非 0 即停，与 `single-commit.md` 第 6 步相同。不要另跑 header / 空行 / 页脚 / `git show` 四段命令。
 5. 通过后再处理下一条。
 
 ```bash
-git add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
-
 printf '%s\n' \
 ':sparkles: (charts) 增加空数据占位' \
 '' \
 '- 折线图无数据时展示占位图' \
 '- 导出入口改为禁用而不是报错' \
-| git commit --file - --only -- \
+| scripts/commit_one --add -- \
   src/charts/EmptyState.tsx \
   src/charts/ExportButton.tsx
+```
+
+Windows PowerShell：
+
+```powershell
+@'
+:sparkles: (charts) 增加空数据占位
+
+- 折线图无数据时展示占位图
+- 导出入口改为禁用而不是报错
+'@ | powershell -NoProfile -File scripts/commit_one.ps1 --add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
 ```
 
 Body 含反引号时不要改用多个 `-m`。不要在未确认时 `git commit --amend`。该次回复只批准「提交」时，全部条目成功后也不要 `git push`。
@@ -165,7 +174,7 @@ Body 含反引号时不要改用多个 `-m`。不要在未确认时 `git commit 
 
 ## 6. 中途失败则停止
 
-任一条在 `git add`、`git commit`（含 hook）或自检失败时：
+任一条 `commit_one` 失败（含 hook，或入口在提交前拒绝）时：
 
 - **不要**继续创建后续预览中的 commit。
 - **不要**假装整单已完成。
