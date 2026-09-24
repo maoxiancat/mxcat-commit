@@ -1,6 +1,11 @@
 # 更新文档
 
-## 1.4.1（2026-09-23）
+## 1.4.1（2026-09-24）
+
+- :bug: (mxcat-commit) 没有创建 commit 时把 index 放回调用前，已创建的 commit 仍不 reset
+- :bug: (mxcat-commit) 按 hunk 或只提交已暂存内容时，符号链接和可执行位写入 commit，未纳入的改动留在工作区
+
+## 1.4.0（2026-09-23）
 
 - :sparkles: (mxcat-commit) 同一文件可按各自的改动分属多条 commit，未纳入的部分留在工作区
 

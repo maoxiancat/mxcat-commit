@@ -37,17 +37,17 @@ sh、bash、zsh 的入口是 `scripts/commit_one`。Windows PowerShell 的入口
 
 ## 自检失败：文件集合与预览不一致
 
-目录参数，或参数里夹了相对 `HEAD` 没有差异、因而不会进入这次 commit 的路径时，`commit_one` 在 `git commit` 之前退出，这条 commit 还没创建：
+目录参数，或参数里夹了相对 `HEAD` 没有差异、因而不会进入这次 commit 的路径时，`commit_one` 在 `git commit` 之前退出。夹了被忽略的文件、或 `git add` 本身失败时同样如此。这条 commit 还没创建，index 与调用前一致：
 
 - 停止后续提交。
 - 向用户报告脚本错误。
-- 不要 `git reset`：这次没有新 commit。
+- 不要 `git reset`：这次没有新 commit，index 也已放回调用前。
 - 不要绕过 `scripts/commit_one` 另写 `git commit`，也不要把消息写到 `/tmp/commit_msg.txt`。
 - 改成这次真正有差异的文件路径后，回到对应 guide 重跑。
 
 `./` 前缀，或在非仓库根目录传入相对当前目录的路径，收成同一仓库相对路径后，对照可以通过。
 
-提交已经成功，但规范化之后文件集合仍对不上时，该条 commit 已经存在，脚本不会 reset：
+提交已经成功，但规范化之后文件集合仍对不上时，该条 commit 已经存在，脚本不会 reset，index 保持这次提交留下的内容：
 
 - 停止后续提交。
 - 向用户报告脚本打印的参数路径与实际路径。
@@ -68,6 +68,8 @@ sh、bash、zsh 的入口是 `scripts/commit_one`。Windows PowerShell 的入口
 - 不要改成不带 `--hunks` 的整文件提交。
 - 不要 `git reset`：这次没有新 commit。
 - 不要把补丁或消息写到 `/tmp/commit_msg.txt`。
+
+同一路径在补丁里出现多次 `diff --git`、暂存的是符号链接或可执行位、工作区类型和 index 不一致时，提交后工作区仍应是调用前的路径。历史里的类型和模式与要提交的条目一致。模式或类型对不上时，这条 commit 已经存在，脚本不会 reset。工作区应已恢复为调用前的内容。
 
 提交已经成功，但该文件的 diff 对不上这次指定的 hunk 时，这条 commit 已经存在，脚本不会 reset。工作区应已恢复为调用前的内容：
 
@@ -90,7 +92,7 @@ sh、bash、zsh 的入口是 `scripts/commit_one`。Windows PowerShell 的入口
 
 ## Hook 或 lint-staged 失败
 
-`commit_one` 因 hook 失败时：
+`commit_one` 因 hook 失败时，这条 commit 还没创建，index 与调用前一致：
 
 - **不要**继续创建后续预览中的 commit。
 - **不要**假装整单已完成。
