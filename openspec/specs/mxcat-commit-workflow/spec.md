@@ -229,7 +229,7 @@ batch 中同一个已跟踪文件 MUST 可以出现在多条 commit 里。每条
 - **AND** 技能 MUST NOT 继续后续 commit，也 MUST NOT push
 
 ### Requirement: 只要暂存区且路径仍有未暂存改动时 MUST 只提交 index blob
-用户要求只提交暂存区，且该条路径上仍有未暂存改动时，`commit_one` MUST 提交该路径在 index 中的 blob，MUST NOT `git add` 工作区全文，MUST NOT 把未暂存 hunk 写入该 commit。调用返回后工作区字节 MUST 与调用前一致，剩余改动 MUST 仍留在工作区。若该路径的 index blob 与 HEAD 相同，MUST 在创建 commit 之前退出，并说明没有可提交的已暂存改动。
+用户要求只提交暂存区，且该条路径上仍有未暂存改动时，`commit_one` MUST 提交该路径在 index 中的模式与 blob，MUST NOT `git add` 工作区全文，MUST NOT 把未暂存 hunk 写入该 commit。新建 commit 中该路径的类型与模式 MUST 等于 index 中的条目。调用返回后该路径的工作区内容与路径类型 MUST 与调用前一致，剩余改动 MUST 仍留在工作区。若该路径在 index 中的模式与 blob 都与 HEAD 相同，MUST 在创建 commit 之前退出，并说明没有可提交的已暂存改动。只改了模式、blob 与 HEAD 相同时，MUST 提交这个模式，MUST NOT 以没有已暂存改动为由退出。sh 与 PowerShell 入口 MUST 使用同一规则。
 
 #### Scenario: 已暂存的一半被提交
 - **WHEN** 用户只要暂存区，该路径的 index 相对 HEAD 有改动，工作区还有更多改动
@@ -238,9 +238,90 @@ batch 中同一个已跟踪文件 MUST 可以出现在多条 commit 里。每条
 - **AND** 未暂存改动 MUST 仍出现在 `git diff` 中
 
 #### Scenario: index 与 HEAD 相同
-- **WHEN** 用户只要暂存区，该路径的未暂存 diff 非空，且 index blob 与 HEAD 相同
+- **WHEN** 用户只要暂存区，该路径的未暂存 diff 非空，且 index 的模式与 blob 都与 HEAD 相同
 - **THEN** `commit_one` MUST 在创建 commit 之前退出
 - **AND** MUST NOT 提交这些未暂存 hunk
+
+#### Scenario: 只暂存了可执行位
+- **WHEN** 用户只要暂存区，index 中该路径为 `100755`，blob 与 HEAD 相同，工作区另有内容改动
+- **THEN** 新建 commit 中该路径 MUST 为 `100755`，blob MUST 与 HEAD 相同
+- **AND** 工作区内容 MUST 与调用前一致
+- **AND** MUST NOT 把未暂存的内容改动写入该 commit
+
+### Requirement: 换入提交 MUST 保持路径类型且不丢未选改动
+按 hunk 提交，或不带 `--add` 提交 index 内容时，`commit_one` MUST 把要提交的模式与 blob 写入该次 commit。`100644` 与 `100755` MUST 保持对应模式。`120000` MUST 作为符号链接提交，链接目标 MUST 等于该 blob 的内容。调用返回后，该路径的工作区字节与路径类型 MUST 与调用前一致。同一路径在一次补丁里出现多个 `diff --git` 头时，MUST 只按该路径换入一次，未纳入的 hunk MUST 仍留在工作区。换入、备份与恢复 MUST NOT 跟随符号链接去改链接目标。工作区是悬空符号链接时，MUST NOT 因目标不存在而在换入前失败，也 MUST NOT 创建该目标。提交后若新建 commit 中该路径的模式或 blob 与要提交的条目不一致，入口 MUST 非 0 退出。该 commit MUST 保留，MUST NOT 自动 `reset`。工作区仍 MUST 恢复为调用前的内容与类型。sh 与 PowerShell 入口 MUST 使用同一规则。
+
+#### Scenario: 同一路径有两段 diff 头
+- **WHEN** 一次 `--hunks` 补丁对同一路径包含两段各自带 `diff --git` 头的 diff，且这些 hunk 都是该文件相对 HEAD 的 diff 的子集
+- **THEN** 新建 commit 中该文件 MUST 只含这些选中的 hunk
+- **AND** 返回后工作区 MUST 仍包含未选中的 hunk
+- **AND** 未选中的 hunk MUST NOT 从工作区消失
+
+#### Scenario: 暂存的符号链接在工作区已是普通文件
+- **WHEN** 用户只要暂存区，index 中该路径为 `120000`，工作区中该路径已是普通文件
+- **THEN** 新建 commit 中该路径 MUST 为 `120000`，链接目标 MUST 等于 index blob 的内容
+- **AND** 返回后工作区中该路径 MUST 仍是调用前的普通文件
+
+#### Scenario: 已暂存的可执行文件在工作区被删掉
+- **WHEN** 用户只要暂存区，index 中该路径为 `100755`，工作区中该路径不存在
+- **THEN** 新建 commit 中该路径 MUST 为 `100755`，内容 MUST 等于 index blob
+- **AND** 返回后工作区中该路径 MUST 仍然不存在
+
+#### Scenario: 工作区文件存在但模式与 index 不同
+- **WHEN** 用户只要暂存区，index 中该路径为 `100755`，工作区中该路径是模式为 `100644` 的普通文件，且仍有未暂存内容
+- **THEN** 新建 commit 中该路径 MUST 为 `100755`
+- **AND** 返回后工作区文件的内容与模式 MUST 与调用前一致
+
+#### Scenario: 符号链接两边目标不一致
+- **WHEN** index 中该路径是指向目标 B 的符号链接，工作区中该路径仍是指向目标 A 的符号链接，且用户只要暂存区
+- **THEN** 新建 commit 中该路径 MUST 为指向 B 的符号链接
+- **AND** 目标 A 与目标 B 的内容 MUST 与调用前一致
+- **AND** 返回后工作区中该路径 MUST 仍指向 A
+
+#### Scenario: 悬空符号链接
+- **WHEN** 工作区中该路径是指向不存在路径的符号链接，且 index 相对 HEAD 有可提交的改动
+- **THEN** 该次调用 MUST 能创建 commit，commit 中该路径的模式与 blob MUST 等于 index
+- **AND** MUST NOT 创建链接目标
+- **AND** 返回后工作区 MUST 仍是调用前的悬空符号链接
+
+### Requirement: 未创建 commit 的失败 MUST 把 index 恢复到调用前
+`commit_one` 在第一次改变 index 之前 MUST 记住调用时的 index。该次调用没有创建 commit 时，退出前 MUST 把 index 恢复成调用时的内容，MUST NOT 移动 HEAD。成功创建 commit 之后，index MUST 保持 `git commit` 留下的结果，MUST NOT 放回调用前。提交后的文件集合或 hunk 对照失败时，已创建的 commit MUST 保留，MUST NOT 自动 `reset`。sh 与 PowerShell 入口 MUST 使用同一规则。
+
+#### Scenario: 夹带未改动文件时 index 回到调用前
+- **WHEN** `--add` 的路径里除本次有差异的文件外，还包含一个相对 HEAD 与 index 都没有差异的文件
+- **THEN** 该次调用 MUST 非 0 退出
+- **AND** MUST NOT 创建 commit
+- **AND** index MUST 与调用前一致
+
+#### Scenario: git add 失败时已暂存的路径也被放回
+- **WHEN** `--add` 的路径里包含一个有差异的文件和一个被忽略的文件，且 `git add` 非 0 退出
+- **THEN** 该次调用 MUST 非 0 退出
+- **AND** MUST NOT 创建 commit
+- **AND** 那个有差异的文件在 index 中 MUST 与调用前一致
+
+#### Scenario: 工作区回到 HEAD 时不盖掉 index 里的另一版
+- **WHEN** 某路径的工作区内容与 HEAD 相同，index 中该路径的 blob 与 HEAD 不同，且对该路径使用 `--add`
+- **THEN** 该次调用 MUST 非 0 退出
+- **AND** MUST NOT 创建 commit
+- **AND** index 中该路径的 blob MUST 仍是调用前的 blob
+
+#### Scenario: hook 拒绝时 index 回到调用前
+- **WHEN** `git commit` 因 hook 非 0 退出
+- **THEN** MUST NOT 创建 commit
+- **AND** index MUST 与调用前一致
+- **AND** HEAD MUST 仍是调用前的 commit
+
+#### Scenario: 成功提交后不放回调用前的 index
+- **WHEN** `commit_one --add` 成功创建 commit
+- **THEN** 该路径在 index 中的 blob MUST 等于新建 commit 中的 blob
+- **AND** 未列入本次路径、调用前已暂存的其它路径 MUST 仍留在 index 中
+
+#### Scenario: 提交后对照失败时保留 commit 与提交后的 index
+- **WHEN** `git commit` 已经创建 commit，随后文件集合或 hunk 对照失败
+- **THEN** 该次调用 MUST 非 0 退出
+- **AND** 该 commit MUST 仍是 HEAD
+- **AND** MUST NOT 自动 `reset`
+- **AND** 已提交路径在 index 中的 blob MUST 等于该 commit，而不是调用前的 blob
 
 ### Requirement: 提交 MUST 锁预览路径
 single 与 batch 在创建每条 commit 时，MUST 调用当前 shell 对应的入口，并把该条预览列出的仓库相对路径作为它的路径参数。当前 shell 是 sh、bash 或 zsh 时，入口 MUST 是技能目录中的 `scripts/commit_one`。当前 shell 是 Windows PowerShell 时，入口 MUST 是 `scripts/commit_one.ps1`。MUST NOT 在 PowerShell 中调用 `scripts/commit_one`，也 MUST NOT 在 sh 中调用 `scripts/commit_one.ps1`。下文的 `commit_one` 指这次实际调用的入口。该入口 MUST 把这些路径传给 `git commit --only`（或等价的「命令行给出路径」模式）。该 commit 的文件集合 MUST 等于这些路径，MUST NOT 把 index 中其它已暂存路径带进去。未列入该条的已暂存路径在提交后 MUST 仍留在 index。rename 或 delete 时，锁路径 MUST 包含该条预览列出的旧路径与新路径。默认输入为整棵工作树时，对整文件路径 `commit_one` MUST 先执行 `git add --`，以便纳入 untracked；用户只要暂存区时，对整文件路径 MUST NOT `git add` 未暂存文件。被标为部分提交的已跟踪路径 MUST NOT 先 `git add` 工作区全文，MUST 提交由当前 HEAD 版本加上该条 hunk 得到的 blob；若 index 中该路径的 blob 已等于这个结果，MUST 改提交该 index blob。`commit_one` MUST NOT 因路径名像密钥、凭证或个人信息而拒绝参数中的路径。
