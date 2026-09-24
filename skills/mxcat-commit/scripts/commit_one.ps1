@@ -593,6 +593,31 @@ try {
                 continue
             }
             if (-not $hasWork) {
+                if ($hasHead -and $hasIndex) {
+                    $stage = Split-ModeBlob -Line $stageLine
+                    $head = Split-TreeModeBlob -Line $headLine
+                    $indexMode = ''
+                    $indexBlob = ''
+                    $headMode = ''
+                    $headBlob = ''
+                    if ($null -ne $stage) {
+                        $indexMode = $stage.Mode
+                        $indexBlob = $stage.Blob
+                    }
+                    if ($null -ne $head) {
+                        $headMode = $head.Mode
+                        $headBlob = $head.Blob
+                    }
+                    $indexDiffers = -not [string]::IsNullOrEmpty($indexBlob) -and -not ($indexMode -ceq $headMode -and $indexBlob -ceq $headBlob)
+                    if ($indexDiffers) {
+                        if (-not (Test-AcceptedMode -Mode $indexMode)) {
+                            Write-CommitError "无法提交该路径的类型: $norm"
+                        }
+                        $pending.Add(@{ Path = $norm; Mode = $indexMode; Blob = $indexBlob })
+                        $partial.Add($norm)
+                        continue
+                    }
+                }
                 $kept.Add($path)
                 $toAdd.Add($path)
                 continue

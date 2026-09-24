@@ -542,6 +542,22 @@ if [ "$add" -eq 1 ]; then
     if [ -z "$_stage" ] && [ -n "$_head" ]; then
       continue
     fi
+    if ! worktree_has "$_norm" && [ -n "$_stage" ] && [ -n "$_head" ]; then
+      _pair=$(mode_blob_from_line "$_stage")
+      _mode=${_pair%% *}
+      _blob=${_pair#* }
+      _hpair=$(tree_mode_blob "$_head")
+      _hmode=${_hpair%% *}
+      _hblob=${_hpair#* }
+      if [ "$_mode" != "$_hmode" ] || [ "$_blob" != "$_hblob" ]; then
+        if ! accept_mode "$_mode"; then
+          die "无法提交该路径的类型: $_norm"
+        fi
+        printf '%s\t%s\t%s\n' "$_norm" "$_mode" "$_blob" >> "$state/pending"
+        printf '%s\n' "$_norm" >> "$partial_tmp"
+        continue
+      fi
+    fi
     if worktree_has "$_norm" && ! git diff --quiet -- "$_arg"; then
       _stage=$(git -C "$repo_root" ls-files -s -- "$_norm" || true)
       _mode=
