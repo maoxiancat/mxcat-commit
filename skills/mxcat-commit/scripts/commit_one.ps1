@@ -142,6 +142,35 @@ function Write-CommitError {
     exit 1
 }
 
+function Test-AcceptedMode {
+    param([string]$Mode)
+    return $Mode -eq '100644' -or $Mode -eq '100755' -or $Mode -eq '120000'
+}
+
+function Split-ModeBlob {
+    param([string]$Line)
+    if ([string]::IsNullOrWhiteSpace($Line)) {
+        return $null
+    }
+    $parts = ($Line.Trim() -split '\s+', 4)
+    if ($parts.Count -lt 2) {
+        return $null
+    }
+    return @{ Mode = $parts[0]; Blob = $parts[1] }
+}
+
+function Split-TreeModeBlob {
+    param([string]$Line)
+    if ([string]::IsNullOrWhiteSpace($Line)) {
+        return $null
+    }
+    $parts = ($Line.Trim() -split '\s+', 4)
+    if ($parts.Count -lt 3) {
+        return $null
+    }
+    return @{ Mode = $parts[0]; Blob = $parts[2] }
+}
+
 function Test-FixedMessagePath {
     param([string]$Path)
     $banned = @('/tmp/commit_msg.txt', '/private/tmp/commit_msg.txt')
@@ -328,6 +357,10 @@ if ($piped.Count -eq 1) {
 
 $tmp = New-TemporaryFile
 $swaps = @()
+$committed = $false
+$indexPath = $null
+$indexBackup = $null
+$indexMissing = $false
 try {
     $utf8 = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($tmp.FullName, $raw, $utf8)
@@ -358,6 +391,20 @@ try {
     }
     $expected = (Get-SortedPaths -Items $expectedItems.ToArray()) -join "`n"
     $expectedSet = @($expectedItems)
+    $indexPath = [string](& git rev-parse --path-format=absolute --git-path index)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($indexPath)) {
+        $indexPath = [string](& git rev-parse --git-path index)
+    }
+    $indexPath = $indexPath.Trim()
+    if (-not [System.IO.Path]::IsPathRooted($indexPath)) {
+        $indexPath = Join-Path (Get-Location) $indexPath
+    }
+    $indexBackup = Join-Path ([System.IO.Path]::GetTempPath()) ('commit-one-index-' + [guid]::NewGuid().ToString('n'))
+    if (Test-Path -LiteralPath $indexPath) {
+        Copy-Item -LiteralPath $indexPath -Destination $indexBackup -Force
+    } else {
+        $indexMissing = $true
+    }
     $partial = New-Object System.Collections.Generic.List[string]
     $pending = New-Object System.Collections.Generic.List[object]
 
@@ -377,7 +424,12 @@ try {
         if (@($parsed.Paths).Count -eq 0) {
             Write-CommitError '补丁不是这些路径的完整 hunk 子集'
         }
+        $seenPartial = @{}
         foreach ($pp in @($parsed.Paths)) {
+            if ($seenPartial.ContainsKey($pp)) {
+                continue
+            }
+            $seenPartial[$pp] = $true
             $known = $false
             foreach ($item in $expectedSet) {
                 if ($item -ceq $pp) {
@@ -412,16 +464,28 @@ try {
                 Write-CommitError '补丁不是这些路径的完整 hunk 子集'
             }
             foreach ($pp in @($partial)) {
-                $blob = [string](& git rev-parse ":$pp")
+                $stageLine = [string](& git ls-files -s -- $pp)
                 if ($LASTEXITCODE -ne 0) {
                     Write-CommitError '补丁不是这些路径的完整 hunk 子集'
                 }
-                $blob = $blob.Trim()
-                $headBlob = [string](& git rev-parse "HEAD:$pp")
-                if ($LASTEXITCODE -ne 0 -or $blob -ceq $headBlob.Trim()) {
+                $stage = Split-ModeBlob -Line $stageLine
+                if ($null -eq $stage) {
                     Write-CommitError '补丁不是这些路径的完整 hunk 子集'
                 }
-                $pending.Add(@{ Path = $pp; Blob = $blob })
+                if (-not (Test-AcceptedMode -Mode $stage.Mode)) {
+                    Write-CommitError "无法提交该路径的类型: $pp"
+                }
+                $head = Split-TreeModeBlob -Line ([string](& git ls-tree HEAD -- $pp))
+                $headMode = ''
+                $headBlob = ''
+                if ($null -ne $head) {
+                    $headMode = $head.Mode
+                    $headBlob = $head.Blob
+                }
+                if ($stage.Mode -ceq $headMode -and $stage.Blob -ceq $headBlob) {
+                    Write-CommitError '补丁不是这些路径的完整 hunk 子集'
+                }
+                $pending.Add(@{ Path = $pp; Mode = $stage.Mode; Blob = $stage.Blob })
             }
         } finally {
             if ($null -eq $prevIndex) {
@@ -465,20 +529,27 @@ try {
                 continue
             }
             $norm = $expectedSet[$n]
+            $stage = Split-ModeBlob -Line ([string](& git ls-files -s -- $norm))
+            $head = Split-TreeModeBlob -Line ([string](& git ls-tree HEAD -- $norm))
+            $indexMode = ''
             $indexBlob = ''
+            $headMode = ''
             $headBlob = ''
-            $indexOut = & git rev-parse -q --verify ":$norm" 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                $indexBlob = ([string]$indexOut).Trim()
+            if ($null -ne $stage) {
+                $indexMode = $stage.Mode
+                $indexBlob = $stage.Blob
             }
-            $headOut = & git rev-parse -q --verify "HEAD:$norm" 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                $headBlob = ([string]$headOut).Trim()
+            if ($null -ne $head) {
+                $headMode = $head.Mode
+                $headBlob = $head.Blob
             }
-            if ([string]::IsNullOrEmpty($indexBlob) -or ($indexBlob -ceq $headBlob)) {
+            if ([string]::IsNullOrEmpty($indexBlob) -or ($indexMode -ceq $headMode -and $indexBlob -ceq $headBlob)) {
                 Write-CommitError '没有可提交的已暂存改动'
             }
-            $pending.Add(@{ Path = $norm; Blob = $indexBlob })
+            if (-not (Test-AcceptedMode -Mode $indexMode)) {
+                Write-CommitError "无法提交该路径的类型: $norm"
+            }
+            $pending.Add(@{ Path = $norm; Mode = $indexMode; Blob = $indexBlob })
             $partial.Add($norm)
         }
     }
@@ -518,20 +589,56 @@ try {
     foreach ($item in @($pending)) {
         $dest = Join-Path $root ($item.Path -replace '/', [System.IO.Path]::DirectorySeparatorChar)
         $backup = $null
+        $linkTo = $null
         $kind = 'm'
-        if (Test-Path -LiteralPath $dest) {
-            $backup = New-TemporaryFile
-            Copy-Item -LiteralPath $dest -Destination $backup.FullName -Force
-            $kind = 'f'
+        $existing = Get-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
+        if ($null -ne $existing) {
+            $isLink = ([int]$existing.Attributes -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0
+            if ($isLink) {
+                $kind = 'l'
+                if ($existing.PSObject.Properties['LinkTarget'] -and $existing.LinkTarget) {
+                    $linkTo = [string]$existing.LinkTarget
+                } elseif ($existing.Target) {
+                    $linkTo = [string]@($existing.Target)[0]
+                }
+            } else {
+                $kind = 'f'
+                $backup = New-TemporaryFile
+                Copy-Item -LiteralPath $dest -Destination $backup.FullName -Force
+            }
         }
-        $made.Add(@{ Path = $item.Path; Kind = $kind; Backup = $(if ($backup) { $backup.FullName } else { $null }); Dest = $dest })
+        $made.Add(@{ Path = $item.Path; Kind = $kind; Backup = $(if ($backup) { $backup.FullName } else { $null }); LinkTo = $linkTo; Dest = $dest; Mode = $item.Mode })
         $swaps = @($made)
+        if (Test-Path -LiteralPath $dest) {
+            Remove-Item -LiteralPath $dest -Force
+        }
         $blobFile = Join-Path ([System.IO.Path]::GetTempPath()) ('commit-one-blob-' + [guid]::NewGuid().ToString('n'))
         $proc = Start-Process -FilePath git -ArgumentList @('cat-file', 'blob', $item.Blob) -RedirectStandardOutput $blobFile -Wait -PassThru -NoNewWindow
         if ($proc.ExitCode -ne 0) {
             exit $proc.ExitCode
         }
-        Copy-Item -LiteralPath $blobFile -Destination $dest -Force
+        if ($item.Mode -eq '120000') {
+            $raw = [System.IO.File]::ReadAllBytes($blobFile)
+            $target = [System.Text.Encoding]::UTF8.GetString($raw)
+            try {
+                New-Item -ItemType SymbolicLink -LiteralPath $dest -Target $target -ErrorAction Stop | Out-Null
+            } catch {
+                Remove-Item -LiteralPath $blobFile -Force -ErrorAction SilentlyContinue
+                Write-CommitError "无法提交该路径的类型: $($item.Path)"
+            }
+        } else {
+            Copy-Item -LiteralPath $blobFile -Destination $dest -Force
+            if ($item.Mode -eq '100755') {
+                $filemode = [string](& git config --bool core.filemode)
+                if ($filemode.Trim() -cne 'true') {
+                    & git update-index --chmod=+x -- $item.Path
+                    if ($LASTEXITCODE -ne 0) {
+                        Remove-Item -LiteralPath $blobFile -Force -ErrorAction SilentlyContinue
+                        exit $LASTEXITCODE
+                    }
+                }
+            }
+        }
         Remove-Item -LiteralPath $blobFile -Force -ErrorAction SilentlyContinue
     }
 
@@ -539,10 +646,11 @@ try {
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
+    $committed = $true
 
     foreach ($item in @($pending)) {
-        $got = [string](& git rev-parse "HEAD:$($item.Path)")
-        if ($LASTEXITCODE -ne 0 -or $got.Trim() -cne $item.Blob) {
+        $got = Split-TreeModeBlob -Line ([string](& git ls-tree HEAD -- $item.Path))
+        if ($LASTEXITCODE -ne 0 -or $null -eq $got -or $got.Mode -cne $item.Mode -or $got.Blob -cne $item.Blob) {
             Write-CommitError '文件 diff 与指定 hunk 不一致'
         }
     }
@@ -566,12 +674,31 @@ try {
         Show-PathMismatch -Expected $expected -Actual $actual
     }
 } finally {
+    if (-not $committed -and -not [string]::IsNullOrEmpty($indexPath)) {
+        if ($indexMissing) {
+            if (Test-Path -LiteralPath $indexPath) {
+                Remove-Item -LiteralPath $indexPath -Force -ErrorAction SilentlyContinue
+            }
+        } elseif (-not [string]::IsNullOrEmpty($indexBackup) -and (Test-Path -LiteralPath $indexBackup)) {
+            Copy-Item -LiteralPath $indexBackup -Destination $indexPath -Force
+        }
+    }
+    if (-not [string]::IsNullOrEmpty($indexBackup) -and (Test-Path -LiteralPath $indexBackup)) {
+        Remove-Item -LiteralPath $indexBackup -Force -ErrorAction SilentlyContinue
+    }
     foreach ($swap in @($swaps)) {
+        if ([string]::IsNullOrEmpty($swap.Dest)) {
+            continue
+        }
+        $left = Get-Item -LiteralPath $swap.Dest -Force -ErrorAction SilentlyContinue
+        if ($null -ne $left) {
+            Remove-Item -LiteralPath $swap.Dest -Force -ErrorAction SilentlyContinue
+        }
         if ($swap.Kind -eq 'f' -and -not [string]::IsNullOrEmpty($swap.Backup)) {
             Copy-Item -LiteralPath $swap.Backup -Destination $swap.Dest -Force
             Remove-Item -LiteralPath $swap.Backup -Force -ErrorAction SilentlyContinue
-        } elseif (-not [string]::IsNullOrEmpty($swap.Dest)) {
-            Remove-Item -LiteralPath $swap.Dest -Force -ErrorAction SilentlyContinue
+        } elseif ($swap.Kind -eq 'l' -and -not [string]::IsNullOrEmpty($swap.LinkTo)) {
+            New-Item -ItemType SymbolicLink -LiteralPath $swap.Dest -Target $swap.LinkTo -ErrorAction SilentlyContinue | Out-Null
         }
     }
     Remove-Item -LiteralPath $tmp.FullName -Force -ErrorAction SilentlyContinue

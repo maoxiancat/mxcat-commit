@@ -237,20 +237,75 @@ reject_partial_path() {
   esac
 }
 
+accept_mode() {
+  case $1 in
+    100644|100755|120000) return 0 ;;
+  esac
+  return 1
+}
+
+# ls-files -s：模式、blob、stage。
+mode_blob_from_line() {
+  _mode=${1%% *}
+  _rest=${1#* }
+  _blob=${_rest%% *}
+  printf '%s %s\n' "$_mode" "$_blob"
+}
+
+# ls-tree：模式、类型、blob，blob 与路径之间是制表符。
+tree_mode_blob() {
+  printf '%s\n' "$1" | awk '{ print $1, $3 }'
+}
+
 record_swap() {
   _path=$1
-  _blob=$2
+  _mode=$2
+  _blob=$3
+  if ! accept_mode "$_mode"; then
+    die "无法提交该路径的类型: $_path"
+  fi
   swap_n=$((swap_n + 1))
   printf '%s\n' "$_path" > "$state/name.$swap_n"
+  printf '%s\n' "$_mode" > "$state/mode.$swap_n"
   printf '%s\n' "$_blob" > "$state/blob.$swap_n"
   _file=$repo_root/$_path
   if [ -e "$_file" ] || [ -L "$_file" ]; then
-    cp -p "$_file" "$state/bak.$swap_n"
+    cp -pP "$_file" "$state/bak.$swap_n"
     printf '%s\n' f > "$state/kind.$swap_n"
   else
     printf '%s\n' m > "$state/kind.$swap_n"
   fi
-  git cat-file blob "$_blob" > "$_file"
+  rm -f "$_file"
+  case $_mode in
+    120000)
+      _raw=$(git cat-file blob "$_blob"; printf x)
+      _raw=${_raw%x}
+      ln -s -- "$_raw" "$_file"
+      ;;
+    *)
+      git cat-file blob "$_blob" > "$_file"
+      if [ "$_mode" = 100755 ]; then
+        chmod a+x "$_file"
+      else
+        chmod a-x "$_file"
+      fi
+      ;;
+  esac
+}
+
+# 文件系统表达不了可执行位时，在 commit 前写进 index。
+mark_unrepresentable_exec() {
+  _i=1
+  while [ -f "$state/mode.$_i" ]; do
+    if [ "$(cat "$state/mode.$_i")" = 100755 ]; then
+      _path=$(cat "$state/name.$_i")
+      _file=$repo_root/$_path
+      if [ ! -x "$_file" ]; then
+        git update-index --chmod=+x -- "$_path"
+      fi
+    fi
+    _i=$((_i + 1))
+  done
 }
 
 restore_swaps() {
@@ -258,16 +313,42 @@ restore_swaps() {
   while [ -f "$state/kind.$_i" ]; do
     _path=$(cat "$state/name.$_i")
     _file=$repo_root/$_path
+    rm -f "$_file"
     if [ "$(cat "$state/kind.$_i")" = f ]; then
-      cp -p "$state/bak.$_i" "$_file"
-    else
-      rm -f "$_file"
+      cp -pP "$state/bak.$_i" "$_file"
     fi
     _i=$((_i + 1))
   done
 }
 
+# 记下调用时的 index。没有创建 commit 时由 cleanup 拷回。
+snapshot_index() {
+  _git_index=$(git rev-parse --path-format=absolute --git-path index 2>/dev/null || git rev-parse --git-path index)
+  case $_git_index in
+    /*) ;;
+    *) _git_index=$(pwd)/$_git_index ;;
+  esac
+  printf '%s\n' "$_git_index" > "$state/index.path"
+  if [ -e "$_git_index" ]; then
+    cp -p "$_git_index" "$state/index.backup"
+  else
+    : > "$state/index.missing"
+  fi
+}
+
+restore_index() {
+  [ "${committed:-0}" -eq 0 ] || return 0
+  [ -n "${state:-}" ] && [ -f "$state/index.path" ] || return 0
+  _dest=$(cat "$state/index.path")
+  if [ -f "$state/index.missing" ]; then
+    rm -f "$_dest"
+  elif [ -f "$state/index.backup" ]; then
+    cp -p "$state/index.backup" "$_dest"
+  fi
+}
+
 cleanup() {
+  restore_index
   if [ -n "${state:-}" ] && [ -d "$state" ]; then
     restore_swaps
     rm -rf "$state"
@@ -310,6 +391,7 @@ whole_tmp=$(mktemp)
 partial_tmp=$(mktemp)
 state=$(mktemp -d)
 swap_n=0
+committed=0
 trap cleanup EXIT INT TERM
 cat > "$tmp"
 
@@ -327,6 +409,7 @@ for _arg in "$@"; do
   printf '%s\n' "$_arg" >> "$args_tmp"
   normalize_arg "$_arg" >> "$paths_tmp"
 done
+snapshot_index
 expected=$(LC_ALL=C sort -u "$paths_tmp")
 
 if [ -n "$hunks" ]; then
@@ -347,6 +430,9 @@ if [ -n "$hunks" ]; then
   printf '%s\n' "$_listed" > "$state/patch-paths"
   while IFS= read -r _pp; do
     [ -n "$_pp" ] || continue
+    if path_in_list "$(cat "$partial_tmp" 2>/dev/null || true)" "$_pp"; then
+      continue
+    fi
     if ! path_in_list "$expected" "$_pp"; then
       die "补丁路径不在参数中: $_pp"
     fi
@@ -367,12 +453,26 @@ if [ -n "$hunks" ]; then
   fi
   while IFS= read -r _pp; do
     [ -n "$_pp" ] || continue
-    _blob=$(GIT_INDEX_FILE=$_idx git rev-parse ":$_pp") || die "补丁不是这些路径的完整 hunk 子集"
-    _head=$(git rev-parse "HEAD:$_pp")
-    if [ "$_blob" = "$_head" ]; then
+    _stage=$(GIT_INDEX_FILE=$_idx git ls-files -s -- "$_pp") || die "补丁不是这些路径的完整 hunk 子集"
+    [ -n "$_stage" ] || die "补丁不是这些路径的完整 hunk 子集"
+    _pair=$(mode_blob_from_line "$_stage")
+    _mode=${_pair%% *}
+    _blob=${_pair#* }
+    if ! accept_mode "$_mode"; then
+      die "无法提交该路径的类型: $_pp"
+    fi
+    _head=$(git ls-tree HEAD -- "$_pp" || true)
+    _hmode=
+    _hblob=
+    if [ -n "$_head" ]; then
+      _hpair=$(tree_mode_blob "$_head")
+      _hmode=${_hpair%% *}
+      _hblob=${_hpair#* }
+    fi
+    if [ "$_mode" = "$_hmode" ] && [ "$_blob" = "$_hblob" ]; then
       die "补丁不是这些路径的完整 hunk 子集"
     fi
-    printf '%s\t%s\n' "$_pp" "$_blob" >> "$state/pending"
+    printf '%s\t%s\t%s\n' "$_pp" "$_mode" "$_blob" >> "$state/pending"
   done < "$partial_tmp"
 fi
 
@@ -397,12 +497,29 @@ elif [ -z "$hunks" ]; then
       continue
     fi
     _norm=$(normalize_arg "$_arg")
-    _index=$(git rev-parse -q --verify ":$_norm" 2>/dev/null || true)
-    _head=$(git rev-parse -q --verify "HEAD:$_norm" 2>/dev/null || true)
-    if [ -z "$_index" ] || [ "$_index" = "$_head" ]; then
+    _stage=$(git ls-files -s -- "$_norm" || true)
+    _mode=
+    _blob=
+    if [ -n "$_stage" ]; then
+      _pair=$(mode_blob_from_line "$_stage")
+      _mode=${_pair%% *}
+      _blob=${_pair#* }
+    fi
+    _head=$(git ls-tree HEAD -- "$_norm" || true)
+    _hmode=
+    _hblob=
+    if [ -n "$_head" ]; then
+      _hpair=$(tree_mode_blob "$_head")
+      _hmode=${_hpair%% *}
+      _hblob=${_hpair#* }
+    fi
+    if [ -z "$_blob" ] || { [ "$_mode" = "$_hmode" ] && [ "$_blob" = "$_hblob" ]; }; then
       die "没有可提交的已暂存改动"
     fi
-    printf '%s\t%s\n' "$_norm" "$_index" >> "$state/pending"
+    if ! accept_mode "$_mode"; then
+      die "无法提交该路径的类型: $_norm"
+    fi
+    printf '%s\t%s\t%s\n' "$_norm" "$_mode" "$_blob" >> "$state/pending"
     printf '%s\n' "$_norm" >> "$partial_tmp"
   done < "$args_tmp"
   : > "$whole_tmp"
@@ -448,13 +565,15 @@ if [ -s "$whole_tmp" ]; then
 fi
 
 if [ -f "$state/pending" ]; then
-  while IFS=$(printf '\t') read -r _pp _blob; do
+  while IFS=$(printf '\t') read -r _pp _mode _blob; do
     [ -n "$_pp" ] || continue
-    record_swap "$_pp" "$_blob"
+    record_swap "$_pp" "$_mode" "$_blob"
   done < "$state/pending"
+  mark_unrepresentable_exec
 fi
 
 git commit --file "$tmp" --only -- "$@"
+committed=1
 
 show_status=$(git -c core.quotePath=false --no-pager show --name-status --pretty=format: HEAD)
 actual=$(printf '%s\n' "$show_status" | paths_from_status | LC_ALL=C sort -u)
@@ -466,9 +585,13 @@ fi
 _i=1
 while [ -f "$state/blob.$_i" ]; do
   _path=$(cat "$state/name.$_i")
+  _want_mode=$(cat "$state/mode.$_i")
   _want=$(cat "$state/blob.$_i")
-  _got=$(git rev-parse "HEAD:$_path")
-  if [ "$_got" != "$_want" ]; then
+  _got=$(git ls-tree HEAD -- "$_path")
+  _gpair=$(tree_mode_blob "$_got")
+  _gmode=${_gpair%% *}
+  _gblob=${_gpair#* }
+  if [ "$_gmode" != "$_want_mode" ] || [ "$_gblob" != "$_want" ]; then
     die "文件 diff 与指定 hunk 不一致"
   fi
   _i=$((_i + 1))
