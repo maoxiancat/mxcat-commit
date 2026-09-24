@@ -216,10 +216,33 @@ path_in_list() {
   printf '%s\n' "$1" | grep -Fxq -- "$2"
 }
 
-# 已暂存 rename / copy 的旧路径。工作区里已经没有这个路径。
-staged_rename_old() {
+# 已暂存 rename 的新路径。不是 rename 时不打印。copy 不算。
+staged_rename_new() {
   git -C "$repo_root" -c core.quotePath=false diff --cached --name-status -M HEAD |
-    awk -F '\t' -v path="$1" '$1 ~ /^[RC]/ && $2 == path { found = 1 } END { exit !found }'
+    awk -F '\t' -v path="$1" '$1 ~ /^R/ && $2 == path { print $3 }'
+}
+
+# 工作区里是否还有这个路径（含符号链接）。
+worktree_has() {
+  _file=$repo_root/$1
+  [ -e "$_file" ] || [ -L "$_file" ]
+}
+
+# 删除已暂存，但工作区又出现了文件。挪走后再提交缺失，结束时放回。
+record_hide() {
+  _path=$1
+  swap_n=$((swap_n + 1))
+  printf '%s\n' "$_path" > "$state/name.$swap_n"
+  printf '%s\n' absent > "$state/mode.$swap_n"
+  printf '%s\n' - > "$state/blob.$swap_n"
+  _file=$repo_root/$_path
+  if [ -e "$_file" ] || [ -L "$_file" ]; then
+    cp -pP "$_file" "$state/bak.$swap_n"
+    printf '%s\n' f > "$state/kind.$swap_n"
+  else
+    printf '%s\n' m > "$state/kind.$swap_n"
+  fi
+  rm -f "$_file"
 }
 
 reject_partial_path() {
@@ -492,13 +515,34 @@ while IFS= read -r _arg; do
 done < "$args_tmp"
 
 if [ "$add" -eq 1 ]; then
+  : > "$state/seen"
   while IFS= read -r _arg; do
     [ -n "$_arg" ] || continue
     _norm=$(normalize_arg "$_arg")
-    if staged_rename_old "$_norm"; then
+    if path_in_list "$(cat "$state/seen" 2>/dev/null || true)" "$_norm"; then
       continue
     fi
-    if ! git diff --quiet -- "$_arg"; then
+    printf '%s\n' "$_norm" >> "$state/seen"
+    if path_in_list "$(cat "$partial_tmp" 2>/dev/null || true)" "$_norm"; then
+      continue
+    fi
+    _new=$(staged_rename_new "$_norm")
+    if [ -n "$_new" ]; then
+      if ! path_in_list "$expected" "$_new"; then
+        die "改名必须同时给出新旧路径: $_norm"
+      fi
+      continue
+    fi
+    _stage=$(git -C "$repo_root" ls-files -s -- "$_norm" || true)
+    _head=$(git -C "$repo_root" ls-tree HEAD -- "$_norm" || true)
+    if [ -z "$_stage" ] && [ -n "$_head" ] && worktree_has "$_norm"; then
+      record_hide "$_norm"
+      continue
+    fi
+    if [ -z "$_stage" ] && [ -n "$_head" ]; then
+      continue
+    fi
+    if worktree_has "$_norm" && ! git diff --quiet -- "$_arg"; then
       _stage=$(git -C "$repo_root" ls-files -s -- "$_norm" || true)
       _mode=
       _blob=
@@ -542,6 +586,16 @@ else
     [ -n "$_arg" ] || continue
     _norm=$(normalize_arg "$_arg")
     if path_in_list "$(cat "$partial_tmp" 2>/dev/null || true)" "$_norm"; then
+      continue
+    fi
+    _new=$(staged_rename_new "$_norm")
+    if [ -n "$_new" ] && ! path_in_list "$expected" "$_new"; then
+      die "改名必须同时给出新旧路径: $_norm"
+    fi
+    _stage=$(git -C "$repo_root" ls-files -s -- "$_norm" || true)
+    _head=$(git -C "$repo_root" ls-tree HEAD -- "$_norm" || true)
+    if [ -z "$_stage" ] && [ -n "$_head" ] && worktree_has "$_norm"; then
+      record_hide "$_norm"
       continue
     fi
     if git diff --quiet -- "$_arg"; then
@@ -637,7 +691,14 @@ while [ -f "$state/blob.$_i" ]; do
   _path=$(cat "$state/name.$_i")
   _want_mode=$(cat "$state/mode.$_i")
   _want=$(cat "$state/blob.$_i")
-  _got=$(git -C "$repo_root" ls-tree HEAD -- "$_path")
+  _got=$(git -C "$repo_root" ls-tree HEAD -- "$_path" || true)
+  if [ "$_want_mode" = absent ]; then
+    if [ -n "$_got" ]; then
+      die "文件 diff 与指定 hunk 不一致"
+    fi
+    _i=$((_i + 1))
+    continue
+  fi
   _gpair=$(tree_mode_blob "$_got")
   _gmode=${_gpair%% *}
   _gblob=${_gpair#* }

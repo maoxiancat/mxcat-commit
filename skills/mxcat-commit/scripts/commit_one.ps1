@@ -147,22 +147,28 @@ function Test-AcceptedMode {
     return $Mode -eq '100644' -or $Mode -eq '100755' -or $Mode -eq '120000'
 }
 
-function Test-StagedRenameOld {
+function Get-StagedRenameNew {
     param([string]$Path)
     $lines = & git -C $root -c core.quotePath=false diff --cached --name-status -M HEAD
     if ($LASTEXITCODE -ne 0) {
-        return $false
+        return ''
     }
     foreach ($raw in @($lines)) {
         $fields = ([string]$raw).TrimEnd("`r") -split "`t", 3
-        if ($fields.Count -lt 2) {
+        if ($fields.Count -lt 3) {
             continue
         }
-        if (($fields[0].StartsWith('R') -or $fields[0].StartsWith('C')) -and ($fields[1] -ceq $Path)) {
-            return $true
+        if ($fields[0].StartsWith('R') -and ($fields[1] -ceq $Path)) {
+            return $fields[2]
         }
     }
-    return $false
+    return ''
+}
+
+function Test-WorktreeHas {
+    param([string]$Rel)
+    $dest = Join-Path $root ($Rel -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+    return Test-Path -LiteralPath $dest
 }
 
 function Split-ModeBlob {
@@ -533,10 +539,62 @@ try {
     if ($add) {
         $kept = New-Object System.Collections.Generic.List[string]
         $toAdd = New-Object System.Collections.Generic.List[string]
+        $seen = New-Object System.Collections.Generic.List[string]
         foreach ($path in @($whole)) {
             $norm = ConvertTo-RepoPath -Path $path -Root $root -Prefix $prefix
-            if (Test-StagedRenameOld -Path $norm) {
+            $seenAlready = $false
+            foreach ($seenPath in @($seen)) {
+                if ($seenPath -ceq $norm) {
+                    $seenAlready = $true
+                    break
+                }
+            }
+            if ($seenAlready) {
+                continue
+            }
+            $seen.Add($norm)
+            $isPartial = $false
+            foreach ($pp in @($partial)) {
+                if ($pp -ceq $norm) {
+                    $isPartial = $true
+                    break
+                }
+            }
+            if ($isPartial) {
+                continue
+            }
+            $renameNew = Get-StagedRenameNew -Path $norm
+            if (-not [string]::IsNullOrEmpty($renameNew)) {
+                $hasNew = $false
+                foreach ($item in $expectedSet) {
+                    if ($item -ceq $renameNew) {
+                        $hasNew = $true
+                        break
+                    }
+                }
+                if (-not $hasNew) {
+                    Write-CommitError "改名必须同时给出新旧路径: $norm"
+                }
                 $kept.Add($path)
+                continue
+            }
+            $stageLine = [string](& git -C $root ls-files -s -- $norm)
+            $headLine = [string](& git -C $root ls-tree HEAD -- $norm)
+            $hasIndex = -not [string]::IsNullOrWhiteSpace($stageLine)
+            $hasHead = -not [string]::IsNullOrWhiteSpace($headLine)
+            $hasWork = Test-WorktreeHas -Rel $norm
+            if ((-not $hasIndex) -and $hasHead -and $hasWork) {
+                $pending.Add(@{ Path = $norm; Mode = 'absent'; Blob = '-' })
+                $kept.Add($path)
+                continue
+            }
+            if ((-not $hasIndex) -and $hasHead) {
+                $kept.Add($path)
+                continue
+            }
+            if (-not $hasWork) {
+                $kept.Add($path)
+                $toAdd.Add($path)
                 continue
             }
             & git diff --quiet -- $path
@@ -592,6 +650,28 @@ try {
                 }
             }
             if ($already) {
+                continue
+            }
+            $renameNew = Get-StagedRenameNew -Path $norm
+            if (-not [string]::IsNullOrEmpty($renameNew)) {
+                $hasNew = $false
+                foreach ($item in $expectedSet) {
+                    if ($item -ceq $renameNew) {
+                        $hasNew = $true
+                        break
+                    }
+                }
+                if (-not $hasNew) {
+                    Write-CommitError "改名必须同时给出新旧路径: $norm"
+                }
+            }
+            $stageLine = [string](& git -C $root ls-files -s -- $norm)
+            $headLine = [string](& git -C $root ls-tree HEAD -- $norm)
+            $hasIndex = -not [string]::IsNullOrWhiteSpace($stageLine)
+            $hasHead = -not [string]::IsNullOrWhiteSpace($headLine)
+            if ((-not $hasIndex) -and $hasHead -and (Test-WorktreeHas -Rel $norm)) {
+                $pending.Add(@{ Path = $norm; Mode = 'absent'; Blob = '-' })
+                $whole.Add($path)
                 continue
             }
             & git diff --quiet -- $path
@@ -682,6 +762,9 @@ try {
         if (Test-Path -LiteralPath $dest) {
             Remove-Item -LiteralPath $dest -Force
         }
+        if ($item.Mode -ceq 'absent') {
+            continue
+        }
         $blobFile = Join-Path ([System.IO.Path]::GetTempPath()) ('commit-one-blob-' + [guid]::NewGuid().ToString('n'))
         $proc = Start-Process -FilePath git -ArgumentList @('cat-file', 'blob', $item.Blob) -RedirectStandardOutput $blobFile -Wait -PassThru -NoNewWindow
         if ($proc.ExitCode -ne 0) {
@@ -719,6 +802,13 @@ try {
     $committed = $true
 
     foreach ($item in @($pending)) {
+        if ($item.Mode -ceq 'absent') {
+            $gone = [string](& git -C $root ls-tree HEAD -- $item.Path)
+            if (-not [string]::IsNullOrWhiteSpace($gone)) {
+                Write-CommitError '文件 diff 与指定 hunk 不一致'
+            }
+            continue
+        }
         $got = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $item.Path))
         if ($LASTEXITCODE -ne 0 -or $null -eq $got -or $got.Mode -cne $item.Mode -or $got.Blob -cne $item.Blob) {
             Write-CommitError '文件 diff 与指定 hunk 不一致'
