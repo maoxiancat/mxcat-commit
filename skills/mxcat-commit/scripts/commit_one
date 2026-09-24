@@ -216,17 +216,23 @@ path_in_list() {
   printf '%s\n' "$1" | grep -Fxq -- "$2"
 }
 
+# 已暂存 rename / copy 的旧路径。工作区里已经没有这个路径。
+staged_rename_old() {
+  git -C "$repo_root" -c core.quotePath=false diff --cached --name-status -M HEAD |
+    awk -F '\t' -v path="$1" '$1 ~ /^[RC]/ && $2 == path { found = 1 } END { exit !found }'
+}
+
 reject_partial_path() {
   _path=$1
   if ! git cat-file -e "HEAD:$_path" 2>/dev/null; then
     die "无法按 hunk 拆分该路径: $_path"
   fi
-  _num=$(git -c core.quotePath=false diff --numstat HEAD -- "$_path" || true)
+  _num=$(git -C "$repo_root" -c core.quotePath=false diff --numstat HEAD -- "$_path" || true)
   case $_num in
     "-"*) die "无法按 hunk 拆分该路径: $_path" ;;
   esac
-  _ns=$(git -c core.quotePath=false diff --name-status -M HEAD -- "$_path" || true)
-  _ns2=$(git -c core.quotePath=false diff --cached --name-status -M HEAD -- "$_path" || true)
+  _ns=$(git -C "$repo_root" -c core.quotePath=false diff --name-status -M HEAD -- "$_path" || true)
+  _ns2=$(git -C "$repo_root" -c core.quotePath=false diff --cached --name-status -M HEAD -- "$_path" || true)
   _code=${_ns%%	*}
   _code2=${_ns2%%	*}
   case $_code in
@@ -301,7 +307,7 @@ mark_unrepresentable_exec() {
       _path=$(cat "$state/name.$_i")
       _file=$repo_root/$_path
       if [ ! -x "$_file" ]; then
-        git update-index --chmod=+x -- "$_path"
+        git -C "$repo_root" update-index --chmod=+x -- "$_path"
       fi
     fi
     _i=$((_i + 1))
@@ -437,7 +443,7 @@ if [ -n "$hunks" ]; then
       die "补丁路径不在参数中: $_pp"
     fi
     reject_partial_path "$_pp"
-    git -c core.quotePath=false diff HEAD -- "$_pp" > "$state/full.diff"
+    git -C "$repo_root" -c core.quotePath=false diff HEAD -- "$_pp" > "$state/full.diff"
     if ! hunks_are_subset "$hunks_abs" "$state/full.diff" "$_pp"; then
       die "补丁不是这些路径的完整 hunk 子集"
     fi
@@ -453,7 +459,7 @@ if [ -n "$hunks" ]; then
   fi
   while IFS= read -r _pp; do
     [ -n "$_pp" ] || continue
-    _stage=$(GIT_INDEX_FILE=$_idx git ls-files -s -- "$_pp") || die "补丁不是这些路径的完整 hunk 子集"
+    _stage=$(GIT_INDEX_FILE=$_idx git -C "$repo_root" ls-files -s -- "$_pp") || die "补丁不是这些路径的完整 hunk 子集"
     [ -n "$_stage" ] || die "补丁不是这些路径的完整 hunk 子集"
     _pair=$(mode_blob_from_line "$_stage")
     _mode=${_pair%% *}
@@ -461,7 +467,7 @@ if [ -n "$hunks" ]; then
     if ! accept_mode "$_mode"; then
       die "无法提交该路径的类型: $_pp"
     fi
-    _head=$(git ls-tree HEAD -- "$_pp" || true)
+    _head=$(git -C "$repo_root" ls-tree HEAD -- "$_pp" || true)
     _hmode=
     _hblob=
     if [ -n "$_head" ]; then
@@ -488,16 +494,60 @@ done < "$args_tmp"
 if [ "$add" -eq 1 ]; then
   while IFS= read -r _arg; do
     [ -n "$_arg" ] || continue
+    _norm=$(normalize_arg "$_arg")
+    if staged_rename_old "$_norm"; then
+      continue
+    fi
+    if ! git diff --quiet -- "$_arg"; then
+      _stage=$(git -C "$repo_root" ls-files -s -- "$_norm" || true)
+      _mode=
+      _blob=
+      if [ -n "$_stage" ]; then
+        _pair=$(mode_blob_from_line "$_stage")
+        _mode=${_pair%% *}
+        _blob=${_pair#* }
+      fi
+      _head=$(git -C "$repo_root" ls-tree HEAD -- "$_norm" || true)
+      _hmode=
+      _hblob=
+      if [ -n "$_head" ]; then
+        _hpair=$(tree_mode_blob "$_head")
+        _hmode=${_hpair%% *}
+        _hblob=${_hpair#* }
+      fi
+      if [ -n "$_blob" ] && { [ "$_mode" != "$_hmode" ] || [ "$_blob" != "$_hblob" ]; }; then
+        if ! git diff --quiet HEAD -- "$_arg"; then
+          if ! accept_mode "$_mode"; then
+            die "无法提交该路径的类型: $_norm"
+          fi
+          printf '%s\t%s\t%s\n' "$_norm" "$_mode" "$_blob" >> "$state/pending"
+          printf '%s\n' "$_norm" >> "$partial_tmp"
+          continue
+        fi
+      fi
+    fi
     git add -- "$_arg"
   done < "$whole_tmp"
-elif [ -z "$hunks" ]; then
+  : > "$whole_tmp"
   while IFS= read -r _arg; do
     [ -n "$_arg" ] || continue
+    _norm=$(normalize_arg "$_arg")
+    if path_in_list "$(cat "$partial_tmp" 2>/dev/null || true)" "$_norm"; then
+      continue
+    fi
+    printf '%s\n' "$_arg" >> "$whole_tmp"
+  done < "$args_tmp"
+else
+  while IFS= read -r _arg; do
+    [ -n "$_arg" ] || continue
+    _norm=$(normalize_arg "$_arg")
+    if path_in_list "$(cat "$partial_tmp" 2>/dev/null || true)" "$_norm"; then
+      continue
+    fi
     if git diff --quiet -- "$_arg"; then
       continue
     fi
-    _norm=$(normalize_arg "$_arg")
-    _stage=$(git ls-files -s -- "$_norm" || true)
+    _stage=$(git -C "$repo_root" ls-files -s -- "$_norm" || true)
     _mode=
     _blob=
     if [ -n "$_stage" ]; then
@@ -505,7 +555,7 @@ elif [ -z "$hunks" ]; then
       _mode=${_pair%% *}
       _blob=${_pair#* }
     fi
-    _head=$(git ls-tree HEAD -- "$_norm" || true)
+    _head=$(git -C "$repo_root" ls-tree HEAD -- "$_norm" || true)
     _hmode=
     _hblob=
     if [ -n "$_head" ]; then
@@ -587,7 +637,7 @@ while [ -f "$state/blob.$_i" ]; do
   _path=$(cat "$state/name.$_i")
   _want_mode=$(cat "$state/mode.$_i")
   _want=$(cat "$state/blob.$_i")
-  _got=$(git ls-tree HEAD -- "$_path")
+  _got=$(git -C "$repo_root" ls-tree HEAD -- "$_path")
   _gpair=$(tree_mode_blob "$_got")
   _gmode=${_gpair%% *}
   _gblob=${_gpair#* }

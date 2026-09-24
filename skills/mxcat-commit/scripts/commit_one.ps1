@@ -147,6 +147,24 @@ function Test-AcceptedMode {
     return $Mode -eq '100644' -or $Mode -eq '100755' -or $Mode -eq '120000'
 }
 
+function Test-StagedRenameOld {
+    param([string]$Path)
+    $lines = & git -C $root -c core.quotePath=false diff --cached --name-status -M HEAD
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+    foreach ($raw in @($lines)) {
+        $fields = ([string]$raw).TrimEnd("`r") -split "`t", 3
+        if ($fields.Count -lt 2) {
+            continue
+        }
+        if (($fields[0].StartsWith('R') -or $fields[0].StartsWith('C')) -and ($fields[1] -ceq $Path)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Split-ModeBlob {
     param([string]$Line)
     if ([string]::IsNullOrWhiteSpace($Line)) {
@@ -276,7 +294,7 @@ function Assert-SplittablePath {
     if ($LASTEXITCODE -ne 0) {
         Write-CommitError "无法按 hunk 拆分该路径: $Path"
     }
-    $num = & git -c core.quotePath=false diff --numstat HEAD -- $Path
+    $num = & git -C $root -c core.quotePath=false diff --numstat HEAD -- $Path
     if ($LASTEXITCODE -ne 0) {
         Write-CommitError "无法按 hunk 拆分该路径: $Path"
     }
@@ -285,8 +303,8 @@ function Assert-SplittablePath {
         Write-CommitError "无法按 hunk 拆分该路径: $Path"
     }
     foreach ($argsDiff in @(
-            @('-c', 'core.quotePath=false', 'diff', '--name-status', '-M', 'HEAD', '--', $Path),
-            @('-c', 'core.quotePath=false', 'diff', '--cached', '--name-status', '-M', 'HEAD', '--', $Path)
+            @('-C', $root, '-c', 'core.quotePath=false', 'diff', '--name-status', '-M', 'HEAD', '--', $Path),
+            @('-C', $root, '-c', 'core.quotePath=false', 'diff', '--cached', '--name-status', '-M', 'HEAD', '--', $Path)
         )) {
         $ns = & git @argsDiff
         if ($LASTEXITCODE -ne 0) {
@@ -464,7 +482,7 @@ try {
                 Write-CommitError '补丁不是这些路径的完整 hunk 子集'
             }
             foreach ($pp in @($partial)) {
-                $stageLine = [string](& git ls-files -s -- $pp)
+                $stageLine = [string](& git -C $root ls-files -s -- $pp)
                 if ($LASTEXITCODE -ne 0) {
                     Write-CommitError '补丁不是这些路径的完整 hunk 子集'
                 }
@@ -475,7 +493,7 @@ try {
                 if (-not (Test-AcceptedMode -Mode $stage.Mode)) {
                     Write-CommitError "无法提交该路径的类型: $pp"
                 }
-                $head = Split-TreeModeBlob -Line ([string](& git ls-tree HEAD -- $pp))
+                $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $pp))
                 $headMode = ''
                 $headBlob = ''
                 if ($null -ne $head) {
@@ -513,24 +531,76 @@ try {
     }
 
     if ($add) {
-        if ($whole.Count -gt 0) {
-            & git add -- @whole
+        $kept = New-Object System.Collections.Generic.List[string]
+        $toAdd = New-Object System.Collections.Generic.List[string]
+        foreach ($path in @($whole)) {
+            $norm = ConvertTo-RepoPath -Path $path -Root $root -Prefix $prefix
+            if (Test-StagedRenameOld -Path $norm) {
+                $kept.Add($path)
+                continue
+            }
+            & git diff --quiet -- $path
+            $unstaged = ($LASTEXITCODE -ne 0)
+            if ($unstaged) {
+                $stage = Split-ModeBlob -Line ([string](& git -C $root ls-files -s -- $norm))
+                $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $norm))
+                $indexMode = ''
+                $indexBlob = ''
+                $headMode = ''
+                $headBlob = ''
+                if ($null -ne $stage) {
+                    $indexMode = $stage.Mode
+                    $indexBlob = $stage.Blob
+                }
+                if ($null -ne $head) {
+                    $headMode = $head.Mode
+                    $headBlob = $head.Blob
+                }
+                $indexDiffers = -not [string]::IsNullOrEmpty($indexBlob) -and -not ($indexMode -ceq $headMode -and $indexBlob -ceq $headBlob)
+                if ($indexDiffers) {
+                    & git diff --quiet HEAD -- $path
+                    if ($LASTEXITCODE -ne 0) {
+                        if (-not (Test-AcceptedMode -Mode $indexMode)) {
+                            Write-CommitError "无法提交该路径的类型: $norm"
+                        }
+                        $pending.Add(@{ Path = $norm; Mode = $indexMode; Blob = $indexBlob })
+                        $partial.Add($norm)
+                        continue
+                    }
+                }
+            }
+            $kept.Add($path)
+            $toAdd.Add($path)
+        }
+        if ($toAdd.Count -gt 0) {
+            & git add -- @toAdd
             if ($LASTEXITCODE -ne 0) {
                 exit $LASTEXITCODE
             }
         }
-    } elseif ([string]::IsNullOrEmpty($hunks)) {
+        $whole = $kept
+    } else {
         $whole = New-Object System.Collections.Generic.List[string]
         for ($n = 0; $n -lt $paths.Count; $n++) {
             $path = $paths[$n]
+            $norm = $expectedSet[$n]
+            $already = $false
+            foreach ($pp in @($partial)) {
+                if ($pp -ceq $norm) {
+                    $already = $true
+                    break
+                }
+            }
+            if ($already) {
+                continue
+            }
             & git diff --quiet -- $path
             if ($LASTEXITCODE -eq 0) {
                 $whole.Add($path)
                 continue
             }
-            $norm = $expectedSet[$n]
-            $stage = Split-ModeBlob -Line ([string](& git ls-files -s -- $norm))
-            $head = Split-TreeModeBlob -Line ([string](& git ls-tree HEAD -- $norm))
+            $stage = Split-ModeBlob -Line ([string](& git -C $root ls-files -s -- $norm))
+            $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $norm))
             $indexMode = ''
             $indexBlob = ''
             $headMode = ''
@@ -631,7 +701,7 @@ try {
             if ($item.Mode -eq '100755') {
                 $filemode = [string](& git config --bool core.filemode)
                 if ($filemode.Trim() -cne 'true') {
-                    & git update-index --chmod=+x -- $item.Path
+                    & git -C $root update-index --chmod=+x -- $item.Path
                     if ($LASTEXITCODE -ne 0) {
                         Remove-Item -LiteralPath $blobFile -Force -ErrorAction SilentlyContinue
                         exit $LASTEXITCODE
@@ -649,7 +719,7 @@ try {
     $committed = $true
 
     foreach ($item in @($pending)) {
-        $got = Split-TreeModeBlob -Line ([string](& git ls-tree HEAD -- $item.Path))
+        $got = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $item.Path))
         if ($LASTEXITCODE -ne 0 -or $null -eq $got -or $got.Mode -cne $item.Mode -or $got.Blob -cne $item.Blob) {
             Write-CommitError '文件 diff 与指定 hunk 不一致'
         }
