@@ -385,7 +385,7 @@ batch 中同一个已跟踪文件 MUST 可以出现在多条 commit 里。每条
 - **AND** 已提交路径在 index 中的 blob MUST 等于该 commit，而不是调用前的 blob
 
 ### Requirement: 提交 MUST 锁预览路径
-single 与 batch 在创建每条 commit 时，MUST 调用当前 shell 对应的入口，并把该条预览列出的仓库相对路径作为它的路径参数。当前 shell 是 sh、bash 或 zsh 时，入口 MUST 是技能目录中的 `scripts/commit_one`。当前 shell 是 Windows PowerShell 时，入口 MUST 是 `scripts/commit_one.ps1`。MUST NOT 在 PowerShell 中调用 `scripts/commit_one`，也 MUST NOT 在 sh 中调用 `scripts/commit_one.ps1`。下文的 `commit_one` 指这次实际调用的入口。该入口 MUST 把这些路径传给 `git commit --only`（或等价的「命令行给出路径」模式）。该 commit 的文件集合 MUST 等于这些路径，MUST NOT 把 index 中其它已暂存路径带进去。未列入该条的已暂存路径在提交后 MUST 仍留在 index。rename 或 delete 时，锁路径 MUST 包含该条预览列出的旧路径与新路径。默认输入为整棵工作树时，对 index 与 HEAD 相同或尚未进入 index 的整文件路径，`commit_one` MUST 先执行 `git add --`，以便纳入 untracked 与仅存在于工作区的改动。index 相对 HEAD 已有改动且工作区还有更多改动的路径，MUST NOT `git add` 工作区全文，MUST 提交 index 中的模式与 blob，未暂存改动 MUST 留在工作区。已暂存 rename 的旧路径已不在工作区、也不在 index 时，MUST NOT 对该旧路径执行 `git add --`；新旧路径都列入参数时，这条 commit MUST 是一次 rename。用户只要暂存区时，对整文件路径 MUST NOT `git add` 未暂存文件。被标为部分提交的已跟踪路径 MUST NOT 先 `git add` 工作区全文，MUST 提交由当前 HEAD 版本加上该条 hunk 得到的 blob；若 index 中该路径的 blob 已等于这个结果，MUST 改提交该 index blob。`commit_one` MUST NOT 因路径名像密钥、凭证或个人信息而拒绝参数中的路径。sh 与 PowerShell 入口 MUST 使用同一规则。
+single 与 batch 在创建每条 commit 时，MUST 调用当前 shell 对应的入口，并把该条预览列出的仓库相对路径作为它的路径参数。当前 shell 是 sh、bash 或 zsh 时，入口 MUST 是技能目录中的 `scripts/commit_one`。当前 shell 是 Windows PowerShell 时，入口 MUST 是 `scripts/commit_one.ps1`。MUST NOT 在 PowerShell 中调用 `scripts/commit_one`，也 MUST NOT 在 sh 中调用 `scripts/commit_one.ps1`。下文的 `commit_one` 指这次实际调用的入口。该入口 MUST 把这些路径传给 `git commit --only`（或等价的「命令行给出路径」模式）。该 commit 的文件集合 MUST 等于这些路径，MUST NOT 把 index 中其它已暂存路径带进去。未列入该条的已暂存路径在提交后 MUST 仍留在 index。rename 或 delete 时，锁路径 MUST 包含该条预览列出的旧路径与新路径。默认输入为整棵工作树时，对 index 与 HEAD 相同或尚未进入 index 的整文件路径，`commit_one` MUST 先执行 `git add --`，以便纳入 untracked 与仅存在于工作区的改动。index 相对 HEAD 已有改动且工作区还有更多改动的路径，MUST NOT `git add` 工作区全文，MUST 提交 index 中的模式与 blob，未暂存改动 MUST 留在工作区。工作区中该路径已不存在、且 index 相对 HEAD 已有改动时，`--add` MUST NOT 对该路径执行 `git add`，MUST 提交 index 中的模式与 blob，返回后该路径 MUST 仍不存在于工作区；该次调用在创建 commit 之前失败时，工作区 MUST 仍不存在该路径，index MUST 回到调用前。index 与 HEAD 的模式和 blob 相同、工作区中该路径已不存在时，`--add` MUST 仍执行 `git add`，该 commit MUST 记录这次删除。尚未进入 HEAD、仅 index 中有该路径、工作区中该路径已不存在时，`--add` MUST 在创建 commit 之前非 0 退出，MUST NOT 创建 commit，index MUST 回到调用前。已暂存 rename 的旧路径已不在工作区、也不在 index 时，MUST NOT 对该旧路径执行 `git add --`；新旧路径都列入参数时，这条 commit MUST 是一次 rename。用户只要暂存区时，对整文件路径 MUST NOT `git add` 未暂存文件。被标为部分提交的已跟踪路径 MUST NOT 先 `git add` 工作区全文，MUST 提交由当前 HEAD 版本加上该条 hunk 得到的 blob；若 index 中该路径的 blob 已等于这个结果，MUST 改提交该 index blob。`commit_one` MUST NOT 因路径名像密钥、凭证或个人信息而拒绝参数中的路径。`--add` 时，一次调用里折成同一仓库相对路径的参数 MUST 只换入一次，恢复 MUST 用调用前的工作区。index 与 HEAD 相同、因此对该路径执行 `git add` 时，重复参数 MUST NOT 取消第一次 `git add`。HEAD 中有、index 与工作区都没有的已暂存删除，`--add` MUST NOT 对该路径执行 `git add`，该 commit MUST 记录这次删除。工作区已删除但 index 仍有该路径时，`--add` MUST 仍对该路径执行 `git add`。删除已暂存且该文件又出现在工作区时，不论是否带 `--add`，该 commit MUST 记录这次删除，后出现的内容 MUST NOT 进入历史，返回后 MUST 仍在工作区。该次调用在创建 commit 之前失败时，MUST 把这个文件放回调用前的内容。已暂存改名不再被识别为 rename、而是删除加新增，且新旧路径都列入参数时，`--add` MUST 创建 commit，MUST NOT 因旧路径匹配不到文件而以非 0 退出。git 仍把这次改动识别为 rename，且参数只有旧路径、新路径不在其中时，不论是否带 `--add`，MUST 在创建 commit 之前退出，MUST NOT 创建删除该旧路径的 commit，index MUST 保持这次改名。git 已把该次改动看成删除加新增时，只传入旧路径 MUST 仍提交这次删除。copy 的旧路径仍在工作区与 index 中时，MUST NOT 按 rename 的旧路径跳过；有未暂存改动时 MUST 只提交 index，否则 MUST 执行 `git add`。sh 与 PowerShell 入口 MUST 使用同一规则。
 
 #### Scenario: 其它已暂存路径不进入本次 commit
 - **WHEN** index 中除预览路径外还暂存了其它文件，且用户已批准按该预览经 `commit_one` 提交
@@ -436,6 +436,90 @@ single 与 batch 在创建每条 commit 时，MUST 调用当前 shell 对应的�
 - **THEN** 该次调用 MUST 创建 commit
 - **AND** 该 commit MUST 是一次 rename
 - **AND** MUST NOT 因旧路径匹配不到文件而以非 0 退出
+
+#### Scenario: 已暂存修改且工作区文件已删除时 --add 提交 index
+- **WHEN** 某路径已在 HEAD 中，index 相对 HEAD 已有改动，工作区中该路径不存在，且 `commit_one --add` 的参数包含该路径
+- **THEN** 新建 commit 中该路径的模式与 blob MUST 等于调用前 index 中的条目
+- **AND** MUST NOT 把该 commit 记成删除该路径
+- **AND** 返回后工作区 MUST 仍不存在该路径
+
+#### Scenario: 只改了模式且工作区文件已删除时 --add 提交该模式
+- **WHEN** 某路径已在 HEAD 中，index 的 blob 与 HEAD 相同但模式不同，工作区中该路径不存在，且 `commit_one --add` 的参数包含该路径
+- **THEN** 新建 commit 中该路径的模式 MUST 等于调用前 index 中的模式
+- **AND** 返回后工作区 MUST 仍不存在该路径
+
+#### Scenario: 提交前失败时已删除的工作区文件仍缺失
+- **WHEN** 某路径已在 HEAD 中，index 相对 HEAD 已有改动，工作区中该路径不存在，且 `commit_one --add` 在创建 commit 之前失败
+- **THEN** MUST NOT 创建 commit
+- **AND** 工作区 MUST 仍不存在该路径
+- **AND** index 中该路径的模式与 blob MUST 与调用前一致
+
+#### Scenario: index 与 HEAD 相同且工作区已删除时 --add 仍提交删除
+- **WHEN** 某路径的 index 与 HEAD 的模式和 blob 相同，工作区中该路径已删除，且 `commit_one --add` 的参数包含该路径
+- **THEN** 新建 commit MUST 记录这次删除
+
+#### Scenario: 新文件只暂存且工作区已删除时 --add 在提交前退出
+- **WHEN** 某路径尚未进入 HEAD，仅 index 中有该路径，工作区中该路径不存在，且 `commit_one --add` 的参数包含该路径
+- **THEN** 该次调用 MUST 在创建 commit 之前非 0 退出
+- **AND** MUST NOT 创建 commit
+- **AND** index 中该路径的模式与 blob MUST 与调用前一致
+
+#### Scenario: --add 同一路径两种写法只换入一次
+- **WHEN** `commit_one --add` 用两种折成同一仓库相对路径的写法传入同一路径，例如 `./note.txt` 与 `note.txt`
+- **AND** 该路径的 index 相对 HEAD 已有改动，工作区还有更多改动
+- **THEN** 新建 commit 中该文件的 diff MUST 等于 index 相对 HEAD 的 diff
+- **AND** 返回后工作区 MUST 仍包含调用前的未暂存改动
+
+#### Scenario: 重复参数但 index 与 HEAD 相同时仍暂存工作区
+- **WHEN** `commit_one --add` 用两种折成同一仓库相对路径的写法传入同一路径
+- **AND** 该路径的 index 与 HEAD 相同，工作区有改动
+- **THEN** 新建 commit 中该文件 MUST 等于工作区全文
+
+#### Scenario: 已暂存的删除可以 --add
+- **WHEN** 某路径已用删除进入 index，工作区中该路径不存在，且 `commit_one --add` 的参数包含该路径
+- **THEN** 该次调用 MUST 创建 commit
+- **AND** 该 commit MUST 记录这次删除
+- **AND** MUST NOT 因路径匹配不到文件而以非 0 退出
+
+#### Scenario: 尚未暂存的工作区删除仍由 --add 纳入
+- **WHEN** 某路径仍在 index 中，工作区中该路径已删除，且 `commit_one --add` 的参数包含该路径
+- **THEN** 新建 commit MUST 记录这次删除
+
+#### Scenario: 删除已暂存且文件又出现在工作区
+- **WHEN** 某路径的删除已在 index 中，工作区又出现该文件，且对该路径调用 `commit_one`，不论是否带 `--add`
+- **THEN** 新建 commit MUST 记录这次删除
+- **AND** 后出现的内容 MUST NOT 进入该 commit
+- **AND** 返回后工作区 MUST 仍是调用前的该文件
+
+#### Scenario: 挪走后出现的文件之后提交失败
+- **WHEN** 删除已暂存且工作区又出现该文件，`commit_one` 在创建 commit 之前失败
+- **THEN** MUST NOT 创建 commit
+- **AND** 工作区中该文件 MUST 与调用前一致
+
+#### Scenario: 改名不再被识别为 rename 时 --add 两个路径
+- **WHEN** 已暂存的 `old.txt` 到 `new.txt` 不再被识别为 rename，而是删除加新增
+- **AND** `commit_one --add` 的路径同时包含旧路径与新路径
+- **THEN** 该次调用 MUST 创建 commit
+- **AND** 该 commit MUST 包含旧路径的删除与新路径的新增
+- **AND** MUST NOT 因旧路径匹配不到文件而以非 0 退出
+
+#### Scenario: 只给 rename 的旧路径
+- **WHEN** index 中已是 `old.txt -> new.txt`，且 `commit_one` 的参数只有旧路径，不论是否带 `--add`
+- **THEN** 该次调用 MUST 在创建 commit 之前退出
+- **AND** MUST NOT 创建删除旧路径的 commit
+- **AND** index MUST 仍是这次改名
+
+#### Scenario: 相似度不足时只给旧路径仍提交删除
+- **WHEN** 已暂存的旧路径到新路径不再被识别为 rename，而是删除加新增
+- **AND** `commit_one` 的参数只有旧路径
+- **THEN** 新建 commit MUST 记录旧路径的这次删除
+- **AND** 新路径 MUST 仍留在 index 中
+
+#### Scenario: copy 的旧路径不按 rename 跳过
+- **WHEN** index 中已是某路径复制到另一路径，旧路径仍在工作区与 index 中，且工作区相对 index 还有未暂存改动
+- **AND** `commit_one --add` 的路径包含该旧路径
+- **THEN** 新建 commit 中该旧路径的 diff MUST 等于 index 相对 HEAD 的 diff
+- **AND** 未暂存改动 MUST 仍留在工作区
 
 ### Requirement: 提交消息 MUST 来自本次命令的标准输入
 single 与 batch 在创建每条 commit 时，消息 MUST 从本次 `commit_one` 的标准输入读入。产生消息的命令与该次 `commit_one` MUST 处于同一条管道。`commit_one` MUST 把这段消息交给同一次 `git commit --file -`，或交给只在该次进程内可见、结束即删除的消息来源后再提交。MUST NOT 把消息写入固定共享路径后再读取（包括 `/tmp/commit_msg.txt`）。header 与 body 之间需要空行时，消息生成 MUST 仍显式给出该空行。batch 每一条 MUST 使用自己的管道，MUST NOT 复用上一条的消息来源。
