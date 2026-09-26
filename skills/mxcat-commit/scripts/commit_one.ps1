@@ -430,7 +430,7 @@ try {
         $indexMissing = $true
     }
     $partial = New-Object System.Collections.Generic.List[string]
-    $pending = New-Object System.Collections.Generic.List[object]
+    $pending = New-Object System.Collections.Generic.List[hashtable]
 
     if (-not [string]::IsNullOrEmpty($hunks)) {
         if (Test-FixedMessagePath -Path $hunks) {
@@ -760,7 +760,7 @@ try {
         }
     }
 
-    $made = New-Object System.Collections.Generic.List[object]
+    $made = New-Object System.Collections.Generic.List[hashtable]
     foreach ($item in @($pending)) {
         $dest = Join-Path $root ($item.Path -replace '/', [System.IO.Path]::DirectorySeparatorChar)
         $backup = $null
