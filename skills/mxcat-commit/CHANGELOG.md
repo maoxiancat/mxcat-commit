@@ -1,5 +1,9 @@
 # 更新文档
 
+## 1.4.6（2026-09-28）
+
+- :bug: (mxcat-commit) 文件系统表达不了可执行位时，commit 仍保持 100755，或把该位改回 100644
+
 ## 1.4.5（2026-09-28）
 
 - :bug: (mxcat-commit) Windows PowerShell 按文档管道提交时，简体中文说明原样进入 commit

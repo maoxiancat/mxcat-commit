@@ -238,7 +238,13 @@ function New-CommitSymlink {
 }
 
 function Set-SwappedFileMode {
-    param([string]$Root, [string]$Dest, [string]$RepoPath, [string]$Mode)
+    param(
+        [string]$Root,
+        [string]$Dest,
+        [string]$RepoPath,
+        [string]$Mode,
+        [switch]$SkipIndexChmod
+    )
     if ($Mode -ceq '100755') {
         if ($env:OS -ne 'Windows_NT') {
             & chmod a+x $Dest
@@ -252,6 +258,9 @@ function Set-SwappedFileMode {
             $executable = ($LASTEXITCODE -eq 0)
         }
         if (-not $executable) {
+            if ($SkipIndexChmod) {
+                return
+            }
             & git -C $Root update-index --chmod=+x -- $RepoPath
             if ($LASTEXITCODE -ne 0) {
                 exit $LASTEXITCODE
@@ -270,6 +279,192 @@ function Set-SwappedFileMode {
 function Test-AcceptedMode {
     param([string]$Mode)
     return $Mode -eq '100644' -or $Mode -eq '100755' -or $Mode -eq '120000'
+}
+
+function Get-IndexHeadState {
+    param([string]$Norm)
+    $stage = Split-ModeBlob -Line ([string](& git -C $root ls-files -s -- $Norm))
+    $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $Norm))
+    $indexMode = ''
+    $indexBlob = ''
+    $headMode = ''
+    $headBlob = ''
+    if ($null -ne $stage) {
+        $indexMode = $stage.Mode
+        $indexBlob = $stage.Blob
+    }
+    if ($null -ne $head) {
+        $headMode = $head.Mode
+        $headBlob = $head.Blob
+    }
+    $differs = -not [string]::IsNullOrEmpty($indexBlob) -and -not ($indexMode -ceq $headMode -and $indexBlob -ceq $headBlob)
+    return @{
+        IndexMode = $indexMode
+        IndexBlob = $indexBlob
+        HeadMode  = $headMode
+        HeadBlob  = $headBlob
+        Differs   = $differs
+    }
+}
+
+function Test-CoreFileMode {
+    $value = [string](& git -C $root config --bool core.filemode)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($value)) {
+        return $true
+    }
+    return $value.Trim() -eq 'true'
+}
+
+function Test-RegularModeShift {
+    param($Item)
+    if ($Item.Mode -cne '100644' -and $Item.Mode -cne '100755') {
+        return $false
+    }
+    $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $Item.Path))
+    $headMode = ''
+    if ($null -ne $head) {
+        $headMode = $head.Mode
+    }
+    return $Item.Mode -cne $headMode
+}
+
+function Remove-IndexPathIfPresent {
+    param([string]$Norm)
+    $listed = [string](& git -C $root ls-files -- $Norm)
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    if ([string]::IsNullOrWhiteSpace($listed)) {
+        return
+    }
+    & git -C $root update-index --force-remove -- $Norm
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+function Restore-ModeIndexEnv {
+    if ($script:modeWorkActive) {
+        Remove-Item Env:GIT_WORK_TREE -ErrorAction SilentlyContinue
+        $script:modeWorkActive = $false
+    }
+    if (-not [string]::IsNullOrEmpty($script:modeWorkTree) -and (Test-Path -LiteralPath $script:modeWorkTree)) {
+        Remove-Item -LiteralPath $script:modeWorkTree -Recurse -Force -ErrorAction SilentlyContinue
+        $script:modeWorkTree = $null
+    }
+    if (-not $script:modeIndexActive) {
+        return
+    }
+    if ($script:modeIndexPrevSet) {
+        $env:GIT_INDEX_FILE = $script:modeIndexPrev
+    } else {
+        Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue
+    }
+    $script:modeIndexActive = $false
+}
+
+function Add-CacheInfoEntry {
+    param($Item)
+    if ($Item.Mode -ceq 'absent') {
+        Remove-IndexPathIfPresent -Norm $Item.Path
+        return
+    }
+    & git -C $root update-index --cacheinfo $Item.Mode $Item.Blob $Item.Path
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+function Submit-CacheInfoCommit {
+    param([string]$MessageFile)
+    $script:modeIndexFile = Join-Path ([System.IO.Path]::GetTempPath()) ('commit-one-commit-' + [guid]::NewGuid().ToString('n'))
+    if (Test-Path Env:GIT_INDEX_FILE) {
+        $script:modeIndexPrev = $env:GIT_INDEX_FILE
+        $script:modeIndexPrevSet = $true
+    } else {
+        $script:modeIndexPrev = $null
+        $script:modeIndexPrevSet = $false
+    }
+    $env:GIT_INDEX_FILE = $script:modeIndexFile
+    $script:modeIndexActive = $true
+    $writeBack = New-Object System.Collections.Generic.List[hashtable]
+    try {
+        & git -C $root rev-parse --verify --quiet HEAD 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            & git -C $root read-tree HEAD
+        } else {
+            & git -C $root read-tree --empty
+        }
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        $handled = @{}
+        foreach ($item in @($pending)) {
+            $pathKey = [string]$item.Path
+            if ($handled.ContainsKey($pathKey)) {
+                continue
+            }
+            $handled[$pathKey] = $true
+            Add-CacheInfoEntry -Item $item
+        }
+        $seenNorm = @{}
+        foreach ($norm in @($expectedSet)) {
+            if ($handled.ContainsKey($norm) -or $seenNorm.ContainsKey($norm)) {
+                continue
+            }
+            $seenNorm[$norm] = $true
+            if (Test-WorktreeHas -Rel $norm) {
+                & git -C $root add -- $norm | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    exit $LASTEXITCODE
+                }
+            } else {
+                Remove-IndexPathIfPresent -Norm $norm
+            }
+        }
+        $script:modeWorkTree = Join-Path ([System.IO.Path]::GetTempPath()) ('commit-one-work-' + [guid]::NewGuid().ToString('n'))
+        New-Item -ItemType Directory -Path $script:modeWorkTree | Out-Null
+        $env:GIT_WORK_TREE = $script:modeWorkTree
+        $script:modeWorkActive = $true
+        & git -C $root checkout-index -a -f | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        $savedPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & git -C $root update-index --refresh 2>$null | Out-Null
+        $ErrorActionPreference = $savedPreference
+        foreach ($item in @($pending)) {
+            if ($item.Mode -ceq 'absent') {
+                continue
+            }
+            & git -C $root update-index --cacheinfo $item.Mode $item.Blob $item.Path
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
+        }
+        & git -C $root commit --file $MessageFile | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        $backSeen = @{}
+        foreach ($norm in @($expectedSet)) {
+            if ($backSeen.ContainsKey($norm)) {
+                continue
+            }
+            $backSeen[$norm] = $true
+            $line = [string](& git -C $root ls-files -s -- $norm)
+            $stage = Split-ModeBlob -Line $line
+            if ($null -eq $stage -or [string]::IsNullOrWhiteSpace($line)) {
+                $writeBack.Add(@{ Path = $norm; Absent = $true })
+            } else {
+                $writeBack.Add(@{ Path = $norm; Absent = $false; Mode = $stage.Mode; Blob = $stage.Blob })
+            }
+        }
+    } finally {
+        Restore-ModeIndexEnv
+    }
+    return ,$writeBack.ToArray()
 }
 
 function Get-StagedRenameNew {
@@ -510,6 +705,12 @@ $committed = $false
 $indexPath = $null
 $indexBackup = $null
 $indexMissing = $false
+$script:modeIndexActive = $false
+$script:modeIndexPrev = $null
+$script:modeIndexPrevSet = $false
+$script:modeIndexFile = $null
+$script:modeWorkActive = $false
+$script:modeWorkTree = $null
 try {
     $utf8 = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($tmp.FullName, $raw, $utf8)
@@ -746,35 +947,14 @@ try {
                 $toAdd.Add($path)
                 continue
             }
-            & git diff --quiet -- $path
-            $unstaged = ($LASTEXITCODE -ne 0)
-            if ($unstaged) {
-                $stage = Split-ModeBlob -Line ([string](& git -C $root ls-files -s -- $norm))
-                $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $norm))
-                $indexMode = ''
-                $indexBlob = ''
-                $headMode = ''
-                $headBlob = ''
-                if ($null -ne $stage) {
-                    $indexMode = $stage.Mode
-                    $indexBlob = $stage.Blob
+            $indexState = Get-IndexHeadState -Norm $norm
+            if ($indexState.Differs) {
+                if (-not (Test-AcceptedMode -Mode $indexState.IndexMode)) {
+                    Write-CommitError "无法提交该路径的类型: $norm"
                 }
-                if ($null -ne $head) {
-                    $headMode = $head.Mode
-                    $headBlob = $head.Blob
-                }
-                $indexDiffers = -not [string]::IsNullOrEmpty($indexBlob) -and -not ($indexMode -ceq $headMode -and $indexBlob -ceq $headBlob)
-                if ($indexDiffers) {
-                    & git diff --quiet HEAD -- $path
-                    if ($LASTEXITCODE -ne 0) {
-                        if (-not (Test-AcceptedMode -Mode $indexMode)) {
-                            Write-CommitError "无法提交该路径的类型: $norm"
-                        }
-                        $pending.Add(@{ Path = $norm; Mode = $indexMode; Blob = $indexBlob })
-                        $partial.Add($norm)
-                        continue
-                    }
-                }
+                $pending.Add(@{ Path = $norm; Mode = $indexState.IndexMode; Blob = $indexState.IndexBlob })
+                $partial.Add($norm)
+                continue
             }
             $kept.Add($path)
             $toAdd.Add($path)
@@ -823,33 +1003,21 @@ try {
                 $whole.Add($path)
                 continue
             }
+            $indexState = Get-IndexHeadState -Norm $norm
+            if ($indexState.Differs) {
+                if (-not (Test-AcceptedMode -Mode $indexState.IndexMode)) {
+                    Write-CommitError "无法提交该路径的类型: $norm"
+                }
+                $pending.Add(@{ Path = $norm; Mode = $indexState.IndexMode; Blob = $indexState.IndexBlob })
+                $partial.Add($norm)
+                continue
+            }
             & git diff --quiet -- $path
             if ($LASTEXITCODE -eq 0) {
                 $whole.Add($path)
                 continue
             }
-            $stage = Split-ModeBlob -Line ([string](& git -C $root ls-files -s -- $norm))
-            $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $norm))
-            $indexMode = ''
-            $indexBlob = ''
-            $headMode = ''
-            $headBlob = ''
-            if ($null -ne $stage) {
-                $indexMode = $stage.Mode
-                $indexBlob = $stage.Blob
-            }
-            if ($null -ne $head) {
-                $headMode = $head.Mode
-                $headBlob = $head.Blob
-            }
-            if ([string]::IsNullOrEmpty($indexBlob) -or ($indexMode -ceq $headMode -and $indexBlob -ceq $headBlob)) {
-                Write-CommitError '没有可提交的已暂存改动'
-            }
-            if (-not (Test-AcceptedMode -Mode $indexMode)) {
-                Write-CommitError "无法提交该路径的类型: $norm"
-            }
-            $pending.Add(@{ Path = $norm; Mode = $indexMode; Blob = $indexBlob })
-            $partial.Add($norm)
+            Write-CommitError '没有可提交的已暂存改动'
         }
     }
 
@@ -881,6 +1049,16 @@ try {
         $actual = (Get-SortedPaths -Items $collapsedStaged.ToArray()) -join "`n"
         if ($expectedWhole -cne $actual) {
             Show-PathMismatch -Expected $expectedWhole -Actual $actual
+        }
+    }
+
+    $useCacheInfo = $false
+    if (-not (Test-CoreFileMode)) {
+        foreach ($item in @($pending)) {
+            if (Test-RegularModeShift -Item $item) {
+                $useCacheInfo = $true
+                break
+            }
         }
     }
 
@@ -927,16 +1105,45 @@ try {
             }
         } else {
             Copy-Item -LiteralPath $blobFile -Destination $dest -Force
-            Set-SwappedFileMode -Root $root -Dest $dest -RepoPath $item.Path -Mode $item.Mode
+            if ($useCacheInfo) {
+                Set-SwappedFileMode -Root $root -Dest $dest -RepoPath $item.Path -Mode $item.Mode -SkipIndexChmod
+            } else {
+                Set-SwappedFileMode -Root $root -Dest $dest -RepoPath $item.Path -Mode $item.Mode
+            }
         }
         Remove-Item -LiteralPath $blobFile -Force -ErrorAction SilentlyContinue
     }
 
-    & git commit --file $tmp.FullName --only -- @paths
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
+    if ($useCacheInfo) {
+        $written = Submit-CacheInfoCommit -MessageFile $tmp.FullName
+        $committed = $true
+        if ($written -is [System.Collections.IDictionary]) {
+            $entries = ,$written
+        } elseif ($null -eq $written) {
+            $entries = @()
+        } else {
+            $entries = $written
+        }
+        foreach ($entry in $entries) {
+            if ($null -eq $entry -or $entry -isnot [System.Collections.IDictionary]) {
+                continue
+            }
+            if ($entry.Absent) {
+                Remove-IndexPathIfPresent -Norm $entry.Path
+            } else {
+                & git -C $root update-index --cacheinfo $entry.Mode $entry.Blob $entry.Path
+                if ($LASTEXITCODE -ne 0) {
+                    exit $LASTEXITCODE
+                }
+            }
+        }
+    } else {
+        & git commit --file $tmp.FullName --only -- @paths
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        $committed = $true
     }
-    $committed = $true
 
     foreach ($item in @($pending)) {
         if ($item.Mode -ceq 'absent') {
@@ -971,6 +1178,10 @@ try {
         Show-PathMismatch -Expected $expected -Actual $actual
     }
 } finally {
+    Restore-ModeIndexEnv
+    if (-not [string]::IsNullOrEmpty($script:modeIndexFile) -and (Test-Path -LiteralPath $script:modeIndexFile)) {
+        Remove-Item -LiteralPath $script:modeIndexFile -Force -ErrorAction SilentlyContinue
+    }
     if (-not $committed -and -not [string]::IsNullOrEmpty($indexPath)) {
         if ($indexMissing) {
             if (Test-Path -LiteralPath $indexPath) {
