@@ -135,16 +135,12 @@ printf '%s\n' \
   src/charts/ExportButton.tsx
 ```
 
-Windows PowerShell 用同一段消息，管道给 `scripts/commit_one.ps1`：
+Windows PowerShell 在同一次进程里放行脚本，把整段说明按 UTF-8 做成 Base64 后解码成一个字符串，再管道给 `scripts/commit_one.ps1`。命令正文只含 ASCII。不要把含非 ASCII 字符的说明明文写进命令，也不要把说明管道给第二个 `powershell -File`。执行策略被挡住时报告并停止。实际提交时对本次生成的整段说明重新编码；下面的 Base64 只对应这一段「增加空数据占位」，含标题和正文之间的空行，以及末尾换行。
 
 ```powershell
-$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
-@'
-:sparkles: (charts) 增加空数据占位
-
-- 折线图无数据时展示占位图
-- 导出入口改为禁用而不是报错
-'@ | powershell -NoProfile -File scripts/commit_one.ps1 --add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+$msg = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('OnNwYXJrbGVzOiAoY2hhcnRzKSDlop7liqDnqbrmlbDmja7ljaDkvY0KCi0g5oqY57q/5Zu+5peg5pWw5o2u5pe25bGV56S65Y2g5L2N5Zu+Ci0g5a+85Ye65YWl5Y+j5pS55Li656aB55So6ICM5LiN5piv5oql6ZSZCg=='))
+$msg | & scripts/commit_one.ps1 --add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
 ```
 
 若有 `BREAKING CHANGE:`，标题用 `:emoji: (scope) ! subject`，body 与 footer 之间留一个空行：
@@ -160,7 +156,7 @@ printf '%s\n' \
   src/charts/ExportButton.tsx
 ```
 
-PowerShell 在管道之前把 `$OutputEncoding` 与 `[Console]::OutputEncoding` 设为无 BOM 的 UTF-8，再把上面同一段消息管道给 `scripts/commit_one.ps1`，参数同样是 `--add --` 与这些路径。
+PowerShell 用同样三条语句送入上面这段说明：整段（含标题、空行和正文）做成 Base64，在同一进程内解码后再管道给 `scripts/commit_one.ps1`，参数同样是 `--add --` 与这些路径。不要在管道前设置 `$OutputEncoding`。
 
 Body 含反引号时尤其不要改用多个 `-m`。
 
@@ -170,7 +166,18 @@ Body 含反引号时尤其不要改用多个 `-m`。
 
 `commit_one`（PowerShell 下是 `commit_one.ps1`）退出非 0 即自检失败。header、分隔空行和禁止页脚在创建 commit 之前就会拒绝，此时没有新的 commit。路径对照失败时，该条 commit 已经存在，脚本不会 reset。
 
-自检失败则停止并报告脚本的错误输出，不要输出第 7 步成功回执，也不要另跑 header / 空行 / 页脚 / `git show` 四段命令。不要绕过当前环境的入口另写 `git commit`。恢复动作见 `troubleshooting.md`。自检通过后，再看 subject / body 是否仍是本次语言（默认中文）。不要在未确认时 `git commit --amend`。通过后输出第 7 步回执。
+自检失败则停止并报告脚本的错误输出，不要输出第 7 步成功回执，也不要另跑 header / 空行 / 页脚 / `git show` 四段命令。不要绕过当前环境的入口另写 `git commit`。恢复动作见 `troubleshooting.md`。自检通过后，再看 subject / body 是否仍是本次语言（默认中文）。不要在未确认时 `git commit --amend`。
+
+Windows PowerShell 上入口返回 0 后，在同一进程里把 `[Console]::OutputEncoding` 设为无 BOM 的 UTF-8，用 `git -c i18n.logOutputEncoding=utf-8 log -1 --format=%B` 取出说明。原生命令输出按行拆开后，先用换行接回，再与本次生成的文字各去掉末尾一个换行，把 commit 说明的每个 Unicode 码点打成四位十六进制。对照的是预览里生成的那句。不一致则停止，不要输出第 7 步成功回执，也不要 `git commit --amend`。「增加」是 `589E 52A0`。把「增加」的 UTF-8 按 GBK 解开得到的「澧炲姞」是 `6FA7 70B2 59DE`。控制台代码页是 936 时，屏幕上的错字不能代替码点。sh、bash、zsh 不增加这一段。
+
+```powershell
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+$got = @(git -c i18n.logOutputEncoding=utf-8 log -1 --format=%B) -join "`n"
+if ($got.EndsWith("`n")) { $got = $got.Substring(0, $got.Length - 1) }
+(-join ([int[]][char[]]$got | ForEach-Object { '{0:X4} ' -f $_ })).Trim()
+```
+
+码点与本次生成的文字一致，或当前 shell 是 sh、bash、zsh 时，输出第 7 步回执。
 
 ## 7. 成功回执
 

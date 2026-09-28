@@ -1,5 +1,9 @@
 # 更新文档
 
+## 1.4.7（2026-09-28）
+
+- :bug: (mxcat-commit) Windows PowerShell 用同一次进程里的 ASCII 命令送入说明，简体中文原样进入 commit，码点对不上则停止
+
 ## 1.4.6（2026-09-28）
 
 - :bug: (mxcat-commit) 文件系统表达不了可执行位时，commit 仍保持 100755，或把该位改回 100644

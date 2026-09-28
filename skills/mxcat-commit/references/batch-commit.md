@@ -142,8 +142,8 @@ git diff --cached --numstat
 
 1. 路径参数 = 该条预览「改动部分」列出的仓库相对路径。rename / delete 要把旧路径和新路径都列入。丢掉的条目即使仍 staged，也不列入剩余条的参数。脚本路径相对于本技能目录（含 `SKILL.md` 的那一层），不是目标仓库根目录。
 2. 默认整棵工作树时带 `--add`。文件只暂存了一截、工作区还有更多改动时，这条 commit 只含 index 里已有的内容，未暂存部分留下。index 与 HEAD 相同、或路径尚未进入 index 时，`--add` 把工作区全文纳入这一条。已暂存的 rename 可以 `--add` 旧路径和新路径；只给旧路径会在提交前退出。已暂存的删除可以 `--add`。删除后又出现的文件不进入 commit。copy 的旧路径按普通文件处理。同一路径的两种写法只换入一次。只要暂存区时不带 `--add`，也不要自己 `git add`。只要暂存区且路径仍有未暂存改动时，脚本提交 index 里已有的内容并留下工作区；index 与 HEAD 相同则在提交前退出。同一文件不是最后一段时，把该条 hunk 写成补丁文件（从 `git diff HEAD` 抄出的完整 hunk，不要用 `/tmp/commit_msg.txt`），调用时加上 `--hunks <file>`。最后一段若只要剩余全部，继续 `--add`，不要再带 `--hunks`。补丁对不上当前 diff 时入口会在提交前退出，不要改成整文件提交。
-3. 把消息管道到当前环境的入口，写入该条标题和正文。sh、bash、zsh 用 `scripts/commit_one`；Windows PowerShell 用 `scripts/commit_one.ps1`。每条 commit 各自一条管道，不要复用上一条的消息来源，也不要写到固定路径（包括 `/tmp/commit_msg.txt`）。不要在 PowerShell 里调用没有扩展名的 `commit_one`，也不要在 sh 里调用 `.ps1`。不要绕过入口另写 `git commit`。不要写入 `AI-Co-Authored-By:`、`Co-authored-by:`、`Jira-Refs:`。
-4. 入口非 0 即停，与 `single-commit.md` 第 6 步相同。不要另跑 header / 空行 / 页脚 / `git show` 四段命令。
+3. 把消息管道到当前环境的入口，写入该条标题和正文。sh、bash、zsh 用 `scripts/commit_one`；Windows PowerShell 用 `scripts/commit_one.ps1`。每条 commit 各自一条管道，不要复用上一条的消息来源，也不要写到固定路径（包括 `/tmp/commit_msg.txt`）。Windows PowerShell 上每条各自把整段说明做成 Base64，在同一次进程内解码后再管道，不要复用上一条的 Base64，也不要把说明管道给第二个 `powershell -File`。不要在 PowerShell 里调用没有扩展名的 `commit_one`，也不要在 sh 里调用 `.ps1`。不要绕过入口另写 `git commit`。不要写入 `AI-Co-Authored-By:`、`Co-authored-by:`、`Jira-Refs:`。
+4. 入口非 0 即停，与 `single-commit.md` 第 6 步相同。不要另跑 header / 空行 / 页脚 / `git show` 四段命令。Windows PowerShell 上入口返回 0 后，还须通过该步的码点对照，再处理下一条。
 5. 通过后再处理下一条。
 
 ```bash
@@ -157,16 +157,21 @@ printf '%s\n' \
   src/charts/ExportButton.tsx
 ```
 
-Windows PowerShell：
+Windows PowerShell 在同一次进程里放行脚本，把该条整段说明按 UTF-8 做成 Base64 后解码成一个字符串，再管道给 `scripts/commit_one.ps1`。命令正文只含 ASCII。不要把含非 ASCII 字符的说明明文写进命令。执行策略被挡住时报告并停止。实际提交时对该条生成的整段说明重新编码；下面的 Base64 只对应这一段「增加空数据占位」，含标题和正文之间的空行，以及末尾换行。
 
 ```powershell
-$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
-@'
-:sparkles: (charts) 增加空数据占位
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+$msg = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('OnNwYXJrbGVzOiAoY2hhcnRzKSDlop7liqDnqbrmlbDmja7ljaDkvY0KCi0g5oqY57q/5Zu+5peg5pWw5o2u5pe25bGV56S65Y2g5L2N5Zu+Ci0g5a+85Ye65YWl5Y+j5pS55Li656aB55So6ICM5LiN5piv5oql6ZSZCg=='))
+$msg | & scripts/commit_one.ps1 --add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
+```
 
-- 折线图无数据时展示占位图
-- 导出入口改为禁用而不是报错
-'@ | powershell -NoProfile -File scripts/commit_one.ps1 --add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
+该条入口返回 0 后，在同一进程里把 `[Console]::OutputEncoding` 设为无 BOM 的 UTF-8，用 `git -c i18n.logOutputEncoding=utf-8 log -1 --format=%B` 取出说明。原生命令输出按行拆开后，先用换行接回，再与该条生成的文字各去掉末尾一个换行，把 commit 说明的每个 Unicode 码点打成四位十六进制。对照的是该条预览里生成的那句。不一致则停止，已成功的 commit 保留，不要输出第 7 步成功回执，也不要 `git commit --amend`。「增加」是 `589E 52A0`。把「增加」的 UTF-8 按 GBK 解开得到的「澧炲姞」是 `6FA7 70B2 59DE`。控制台代码页是 936 时，屏幕上的错字不能代替码点。sh、bash、zsh 不增加这一段。
+
+```powershell
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+$got = @(git -c i18n.logOutputEncoding=utf-8 log -1 --format=%B) -join "`n"
+if ($got.EndsWith("`n")) { $got = $got.Substring(0, $got.Length - 1) }
+(-join ([int[]][char[]]$got | ForEach-Object { '{0:X4} ' -f $_ })).Trim()
 ```
 
 Body 含反引号时不要改用多个 `-m`。不要在未确认时 `git commit --amend`。该次回复只批准「提交」时，全部条目成功后也不要 `git push`。
