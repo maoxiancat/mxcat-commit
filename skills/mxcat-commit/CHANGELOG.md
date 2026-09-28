@@ -1,5 +1,10 @@
 # 更新文档
 
+## 1.4.5（2026-09-28）
+
+- :bug: (mxcat-commit) Windows PowerShell 按文档管道提交时，简体中文说明原样进入 commit
+- :bug: (mxcat-commit) 部分提交按行识别 hunk，保持可执行位和符号链接；换入失败时原链接还在；经目录符号链接的绝对路径可以提交
+
 ## 1.4.4（2026-09-24）
 
 - :bug: (mxcat-commit) index 已有改动且工作区文件缺失时，`--add` 提交 index 并留下缺失

@@ -138,6 +138,7 @@ printf '%s\n' \
 Windows PowerShell 用同一段消息，管道给 `scripts/commit_one.ps1`：
 
 ```powershell
+$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 @'
 :sparkles: (charts) 增加空数据占位
 
@@ -159,7 +160,7 @@ printf '%s\n' \
   src/charts/ExportButton.tsx
 ```
 
-PowerShell 把上面同一段消息管道给 `scripts/commit_one.ps1`，参数同样是 `--add --` 与这些路径。
+PowerShell 在管道之前把 `$OutputEncoding` 与 `[Console]::OutputEncoding` 设为无 BOM 的 UTF-8，再把上面同一段消息管道给 `scripts/commit_one.ps1`，参数同样是 `--add --` 与这些路径。
 
 Body 含反引号时尤其不要改用多个 `-m`。
 

@@ -160,6 +160,7 @@ printf '%s\n' \
 Windows PowerShell：
 
 ```powershell
+$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 @'
 :sparkles: (charts) 增加空数据占位
 
