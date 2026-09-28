@@ -55,21 +55,6 @@ function Test-CommitMessage {
 function Read-CommitMessage {
     param($Pipeline)
 
-    $raw = ''
-    if ([Console]::IsInputRedirected) {
-        $utf8 = New-Object System.Text.UTF8Encoding $false
-        $stream = [Console]::OpenStandardInput()
-        $reader = New-Object System.IO.StreamReader ($stream, $utf8, $false, 1024, $true)
-        try {
-            $raw = $reader.ReadToEnd()
-        } finally {
-            $reader.Dispose()
-        }
-    }
-    if (-not [string]::IsNullOrEmpty($raw)) {
-        return $raw
-    }
-
     $piped = New-Object System.Collections.Generic.List[string]
     if ($null -ne $Pipeline) {
         foreach ($item in $Pipeline) {
@@ -81,6 +66,17 @@ function Read-CommitMessage {
     }
     if ($piped.Count -gt 1) {
         return (($piped -join "`n") + "`n")
+    }
+
+    if ([Console]::IsInputRedirected) {
+        $utf8 = New-Object System.Text.UTF8Encoding $false
+        $stream = [Console]::OpenStandardInput()
+        $reader = New-Object System.IO.StreamReader ($stream, $utf8, $false, 1024, $true)
+        try {
+            return $reader.ReadToEnd()
+        } finally {
+            $reader.Dispose()
+        }
     }
     return ''
 }
