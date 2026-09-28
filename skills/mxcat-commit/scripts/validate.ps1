@@ -52,21 +52,40 @@ function Test-CommitMessage {
     return $code
 }
 
-if ($MyInvocation.InvocationName -ne '.') {
+function Read-CommitMessage {
+    param($Pipeline)
+
+    $raw = ''
+    if ([Console]::IsInputRedirected) {
+        $utf8 = New-Object System.Text.UTF8Encoding $false
+        $stream = [Console]::OpenStandardInput()
+        $reader = New-Object System.IO.StreamReader ($stream, $utf8, $false, 1024, $true)
+        try {
+            $raw = $reader.ReadToEnd()
+        } finally {
+            $reader.Dispose()
+        }
+    }
+    if (-not [string]::IsNullOrEmpty($raw)) {
+        return $raw
+    }
+
     $piped = New-Object System.Collections.Generic.List[string]
-    foreach ($item in $input) {
-        $piped.Add([string]$item)
+    if ($null -ne $Pipeline) {
+        foreach ($item in $Pipeline) {
+            $piped.Add([string]$item)
+        }
     }
     if ($piped.Count -eq 1) {
-        $raw = $piped[0]
-    } elseif ($piped.Count -gt 1) {
-        $raw = ($piped -join "`n") + "`n"
-    } elseif ([Console]::IsInputRedirected) {
-        $utf8 = New-Object System.Text.UTF8Encoding $false
-        [Console]::InputEncoding = $utf8
-        $raw = [Console]::In.ReadToEnd()
-    } else {
-        $raw = ''
+        return $piped[0]
     }
-    exit (Test-CommitMessage -Message $raw)
+    if ($piped.Count -gt 1) {
+        return (($piped -join "`n") + "`n")
+    }
+    return ''
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    $pipeline = Get-Variable -Name input -ValueOnly -ErrorAction SilentlyContinue
+    exit (Test-CommitMessage -Message (Read-CommitMessage -Pipeline $pipeline))
 }

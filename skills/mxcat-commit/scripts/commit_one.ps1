@@ -56,10 +56,79 @@ function Collapse-RepoPath {
     return @{ Escaped = $escaped; Path = ($acc -join '/') }
 }
 
+function Get-WindowsFinalDirectory {
+    param([string]$Dir)
+    try {
+        if (-not ('Mxcat.NativePath' -as [type])) {
+        Add-Type -Namespace Mxcat -Name NativePath -UsingNamespace @(
+            'System.Runtime.InteropServices',
+            'System.Text',
+            'Microsoft.Win32.SafeHandles'
+        ) -MemberDefinition @'
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(
+    string name,
+    uint access,
+    uint share,
+    IntPtr security,
+    uint disposition,
+    uint flags,
+    IntPtr template);
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern uint GetFinalPathNameByHandle(
+    Microsoft.Win32.SafeHandles.SafeFileHandle handle,
+    System.Text.StringBuilder buffer,
+    uint length,
+    uint flags);
+'@
+    }
+    $handle = [Mxcat.NativePath]::CreateFile(
+        $Dir,
+        [uint32]2147483648,
+        [uint32]7,
+        [IntPtr]::Zero,
+        [uint32]3,
+        [uint32]33554432,
+        [IntPtr]::Zero)
+    if ($handle.IsInvalid) {
+        return $null
+    }
+    try {
+        $buffer = New-Object System.Text.StringBuilder 4096
+        $got = [Mxcat.NativePath]::GetFinalPathNameByHandle($handle, $buffer, [uint32]$buffer.Capacity, [uint32]0)
+        if ($got -eq 0) {
+            return $null
+        }
+        if ($got -gt $buffer.Capacity) {
+            $buffer = New-Object System.Text.StringBuilder ([int]$got)
+            $got = [Mxcat.NativePath]::GetFinalPathNameByHandle($handle, $buffer, [uint32]$buffer.Capacity, [uint32]0)
+            if ($got -eq 0) {
+                return $null
+            }
+        }
+        $full = $buffer.ToString()
+        if ($full.StartsWith('\\?\UNC\')) {
+            $full = '\' + $full.Substring(7)
+        } elseif ($full.StartsWith('\\?\')) {
+            $full = $full.Substring(4)
+        }
+        return $full.TrimEnd('\')
+    } finally {
+        $handle.Dispose()
+    }
+    } catch {
+        return $null
+    }
+}
+
 function Resolve-PhysicalDirectory {
     param([string]$Dir)
     if ($env:OS -eq 'Windows_NT') {
-        return ([System.IO.Path]::GetFullPath($Dir)).TrimEnd('\')
+        $final = Get-WindowsFinalDirectory -Dir $Dir
+        if ([string]::IsNullOrEmpty($final)) {
+            return ([System.IO.Path]::GetFullPath($Dir)).TrimEnd('\')
+        }
+        return $final
     }
     $out = & /bin/sh -c 'CDPATH= cd -P -- "$1" && pwd' sh $Dir 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty([string]$out)) {
@@ -142,6 +211,62 @@ function Write-CommitError {
     exit 1
 }
 
+function Save-GitBlob {
+    param([string]$Root, [string]$Blob, [string]$Dest)
+    if ($env:OS -eq 'Windows_NT') {
+        $rootQ = $Root.Replace('"', '""')
+        $destQ = $Dest.Replace('"', '""')
+        $line = "git -C `"$rootQ`" cat-file blob $Blob > `"$destQ`""
+        & cmd.exe /d /s /c $line
+    } else {
+        & /bin/sh -c 'git -C "$1" cat-file blob "$2" > "$3"' sh $Root $Blob $Dest
+    }
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+function New-CommitSymlink {
+    param([string]$Path, [string]$Target)
+    $parent = [System.IO.Path]::GetDirectoryName($Path)
+    $leaf = [System.IO.Path]::GetFileName($Path)
+    if ([string]::IsNullOrEmpty($parent)) {
+        $parent = [System.IO.Directory]::GetCurrentDirectory()
+    }
+    $escapedParent = [System.Management.Automation.WildcardPattern]::Escape($parent)
+    New-Item -ItemType SymbolicLink -Path $escapedParent -Name $leaf -Target $Target -ErrorAction Stop | Out-Null
+}
+
+function Set-SwappedFileMode {
+    param([string]$Root, [string]$Dest, [string]$RepoPath, [string]$Mode)
+    if ($Mode -ceq '100755') {
+        if ($env:OS -ne 'Windows_NT') {
+            & chmod a+x $Dest
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
+        }
+        $executable = $false
+        if ($env:OS -ne 'Windows_NT') {
+            & /bin/test -x $Dest
+            $executable = ($LASTEXITCODE -eq 0)
+        }
+        if (-not $executable) {
+            & git -C $Root update-index --chmod=+x -- $RepoPath
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
+        }
+        return
+    }
+    if ($env:OS -ne 'Windows_NT') {
+        & chmod a-x $Dest
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+    }
+}
+
 function Test-AcceptedMode {
     param([string]$Mode)
     return $Mode -eq '100644' -or $Mode -eq '100755' -or $Mode -eq '120000'
@@ -211,10 +336,22 @@ function Test-FixedMessagePath {
     return $false
 }
 
+function Split-PatchLines {
+    param([AllowEmptyString()][string]$Text)
+    $parts = @(([string]$Text).Split([string[]]@("`n"), [System.StringSplitOptions]::None))
+    if ($parts.Count -gt 0 -and $parts[-1] -eq '' -and ([string]$Text).EndsWith("`n")) {
+        if ($parts.Count -eq 1) {
+            return @()
+        }
+        return @($parts[0..($parts.Count - 2)])
+    }
+    return @($parts)
+}
+
 function Get-PatchPaths {
     param([string]$PatchText)
     $paths = New-Object System.Collections.Generic.List[string]
-    foreach ($raw in ($PatchText -split "`n", -1)) {
+    foreach ($raw in @(Split-PatchLines -Text $PatchText)) {
         $line = $raw.TrimEnd("`r")
         if (-not $line.StartsWith('diff --git a/')) {
             continue
@@ -240,7 +377,7 @@ function Get-HunkTexts {
     $want = $false
     $buf = $null
     $hunks = New-Object System.Collections.Generic.List[string]
-    foreach ($raw in ($DiffText -split "`n", -1)) {
+    foreach ($raw in @(Split-PatchLines -Text $DiffText)) {
         $line = $raw.TrimEnd("`r")
         if ($line.StartsWith('diff --git ')) {
             if ($null -ne $buf) {
@@ -363,21 +500,9 @@ if ($paths.Count -eq 0 -or [string]::IsNullOrEmpty($paths[0])) {
     Show-Usage
 }
 
-$piped = New-Object System.Collections.Generic.List[string]
-foreach ($item in $input) {
-    $piped.Add([string]$item)
-}
-if ($piped.Count -eq 1) {
-    $raw = $piped[0]
-} elseif ($piped.Count -gt 1) {
-    $raw = ($piped -join "`n") + "`n"
-} elseif ([Console]::IsInputRedirected) {
-    $utf8In = New-Object System.Text.UTF8Encoding $false
-    [Console]::InputEncoding = $utf8In
-    $raw = [Console]::In.ReadToEnd()
-} else {
-    $raw = ''
-}
+. (Join-Path $PSScriptRoot 'validate.ps1')
+$pipeline = Get-Variable -Name input -ValueOnly -ErrorAction SilentlyContinue
+$raw = Read-CommitMessage -Pipeline $pipeline
 
 $tmp = New-TemporaryFile
 $swaps = @()
@@ -389,7 +514,6 @@ try {
     $utf8 = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($tmp.FullName, $raw, $utf8)
 
-    . (Join-Path $PSScriptRoot 'validate.ps1')
     $valid = Test-CommitMessage -Message $raw
     if ($valid -ne 0) {
         exit $valid
@@ -791,31 +915,19 @@ try {
             continue
         }
         $blobFile = Join-Path ([System.IO.Path]::GetTempPath()) ('commit-one-blob-' + [guid]::NewGuid().ToString('n'))
-        $proc = Start-Process -FilePath git -ArgumentList @('cat-file', 'blob', $item.Blob) -RedirectStandardOutput $blobFile -Wait -PassThru -NoNewWindow
-        if ($proc.ExitCode -ne 0) {
-            exit $proc.ExitCode
-        }
+        Save-GitBlob -Root $root -Blob $item.Blob -Dest $blobFile
         if ($item.Mode -eq '120000') {
-            $raw = [System.IO.File]::ReadAllBytes($blobFile)
-            $target = [System.Text.Encoding]::UTF8.GetString($raw)
+            $blobBytes = [System.IO.File]::ReadAllBytes($blobFile)
+            $target = [System.Text.Encoding]::UTF8.GetString($blobBytes)
             try {
-                New-Item -ItemType SymbolicLink -LiteralPath $dest -Target $target -ErrorAction Stop | Out-Null
+                New-CommitSymlink -Path $dest -Target $target
             } catch {
                 Remove-Item -LiteralPath $blobFile -Force -ErrorAction SilentlyContinue
                 Write-CommitError "无法提交该路径的类型: $($item.Path)"
             }
         } else {
             Copy-Item -LiteralPath $blobFile -Destination $dest -Force
-            if ($item.Mode -eq '100755') {
-                $filemode = [string](& git config --bool core.filemode)
-                if ($filemode.Trim() -cne 'true') {
-                    & git -C $root update-index --chmod=+x -- $item.Path
-                    if ($LASTEXITCODE -ne 0) {
-                        Remove-Item -LiteralPath $blobFile -Force -ErrorAction SilentlyContinue
-                        exit $LASTEXITCODE
-                    }
-                }
-            }
+            Set-SwappedFileMode -Root $root -Dest $dest -RepoPath $item.Path -Mode $item.Mode
         }
         Remove-Item -LiteralPath $blobFile -Force -ErrorAction SilentlyContinue
     }
@@ -883,7 +995,7 @@ try {
             Copy-Item -LiteralPath $swap.Backup -Destination $swap.Dest -Force
             Remove-Item -LiteralPath $swap.Backup -Force -ErrorAction SilentlyContinue
         } elseif ($swap.Kind -eq 'l' -and -not [string]::IsNullOrEmpty($swap.LinkTo)) {
-            New-Item -ItemType SymbolicLink -LiteralPath $swap.Dest -Target $swap.LinkTo -ErrorAction SilentlyContinue | Out-Null
+            New-CommitSymlink -Path $swap.Dest -Target $swap.LinkTo
         }
     }
     Remove-Item -LiteralPath $tmp.FullName -Force -ErrorAction SilentlyContinue
