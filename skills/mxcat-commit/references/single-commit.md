@@ -135,12 +135,16 @@ printf '%s\n' \
   src/charts/ExportButton.tsx
 ```
 
-Windows PowerShell 在同一次进程里放行脚本，把整段说明按 UTF-8 做成 Base64 后解码成一个字符串，再管道给 `scripts/commit_one.ps1`。命令正文只含 ASCII。不要把含非 ASCII 字符的说明明文写进命令，也不要把说明管道给第二个 `powershell -File`。执行策略被挡住时报告并停止。实际提交时对本次生成的整段说明重新编码；下面的 Base64 只对应这一段「增加空数据占位」，含标题和正文之间的空行，以及末尾换行。
+Windows PowerShell 在管道之前把 `$OutputEncoding` 设为无 BOM 的 UTF-8，再把整段说明管道给子进程 `powershell -NoProfile -File scripts/commit_one.ps1`。不要在当前会话里直接 `&` 这个脚本。下面这段是「增加空数据占位」，含标题和正文之间的空行。
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-$msg = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('OnNwYXJrbGVzOiAoY2hhcnRzKSDlop7liqDnqbrmlbDmja7ljaDkvY0KCi0g5oqY57q/5Zu+5peg5pWw5o2u5pe25bGV56S65Y2g5L2N5Zu+Ci0g5a+85Ye65YWl5Y+j5pS55Li656aB55So6ICM5LiN5piv5oql6ZSZCg=='))
-$msg | & scripts/commit_one.ps1 --add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
+$OutputEncoding = New-Object System.Text.UTF8Encoding $false
+@'
+:sparkles: (charts) 增加空数据占位
+
+- 折线图无数据时展示占位图
+- 导出入口改为禁用而不是报错
+'@ | powershell -NoProfile -File scripts/commit_one.ps1 --add -- src/charts/EmptyState.tsx src/charts/ExportButton.tsx
 ```
 
 若有 `BREAKING CHANGE:`，标题用 `:emoji: (scope) ! subject`，body 与 footer 之间留一个空行：
@@ -156,7 +160,7 @@ printf '%s\n' \
   src/charts/ExportButton.tsx
 ```
 
-PowerShell 用同样三条语句送入上面这段说明：整段（含标题、空行和正文）做成 Base64，在同一进程内解码后再管道给 `scripts/commit_one.ps1`，参数同样是 `--add --` 与这些路径。不要在管道前设置 `$OutputEncoding`。
+PowerShell 在管道之前把 `$OutputEncoding` 设为无 BOM 的 UTF-8，再把上面同一段消息管道给 `powershell -NoProfile -File scripts/commit_one.ps1`，参数同样是 `--add --` 与这些路径。不要在当前会话里直接 `&` 脚本。
 
 Body 含反引号时尤其不要改用多个 `-m`。
 

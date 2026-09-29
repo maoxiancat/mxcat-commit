@@ -1,5 +1,9 @@
 # 更新文档
 
+## 1.4.8（2026-09-29）
+
+- :bug: (mxcat-commit) Windows PowerShell 用无 BOM UTF-8 把说明送进子进程，简体中文原样进入 commit；仓库根含非 ASCII 字符时 `git -C` 仍用真实路径，失败则在创建 commit 之前退出
+
 ## 1.4.7（2026-09-28）
 
 - :bug: (mxcat-commit) Windows PowerShell 用同一次进程里的 ASCII 命令送入说明，简体中文原样进入 commit，码点对不上则停止

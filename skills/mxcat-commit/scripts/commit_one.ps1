@@ -283,8 +283,16 @@ function Test-AcceptedMode {
 
 function Get-IndexHeadState {
     param([string]$Norm)
-    $stage = Split-ModeBlob -Line ([string](& git -C $root ls-files -s -- $Norm))
-    $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $Norm))
+    $stageLine = & git -C $root ls-files -s -- $Norm
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    $headLine = & git -C $root ls-tree HEAD -- $Norm
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    $stage = Split-ModeBlob -Line ([string]$stageLine)
+    $head = Split-TreeModeBlob -Line ([string]$headLine)
     $indexMode = ''
     $indexBlob = ''
     $headMode = ''
@@ -320,7 +328,11 @@ function Test-RegularModeShift {
     if ($Item.Mode -cne '100644' -and $Item.Mode -cne '100755') {
         return $false
     }
-    $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $Item.Path))
+    $headLine = & git -C $root ls-tree HEAD -- $Item.Path
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+    $head = Split-TreeModeBlob -Line ([string]$headLine)
     $headMode = ''
     if ($null -ne $head) {
         $headMode = $head.Mode
@@ -454,6 +466,9 @@ function Submit-CacheInfoCommit {
             }
             $backSeen[$norm] = $true
             $line = [string](& git -C $root ls-files -s -- $norm)
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
             $stage = Split-ModeBlob -Line $line
             if ($null -eq $stage -or [string]::IsNullOrWhiteSpace($line)) {
                 $writeBack.Add(@{ Path = $norm; Absent = $true })
@@ -471,7 +486,7 @@ function Get-StagedRenameNew {
     param([string]$Path)
     $lines = & git -C $root -c core.quotePath=false diff --cached --name-status -M HEAD
     if ($LASTEXITCODE -ne 0) {
-        return ''
+        exit $LASTEXITCODE
     }
     foreach ($raw in @($lines)) {
         $fields = ([string]$raw).TrimEnd("`r") -split "`t", 3
@@ -696,8 +711,14 @@ if ($paths.Count -eq 0 -or [string]::IsNullOrEmpty($paths[0])) {
 }
 
 . (Join-Path $PSScriptRoot 'validate.ps1')
-$pipeline = Get-Variable -Name input -ValueOnly -ErrorAction SilentlyContinue
+$pipeline = $null
+if (-not [Console]::IsInputRedirected) {
+    $pipeline = Get-Variable -Name input -ValueOnly -ErrorAction SilentlyContinue
+}
 $raw = Read-CommitMessage -Pipeline $pipeline
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$OutputEncoding = $utf8NoBom
+[Console]::OutputEncoding = $utf8NoBom
 
 $tmp = New-TemporaryFile
 $swaps = @()
@@ -725,6 +746,10 @@ try {
         exit $LASTEXITCODE
     }
     $root = $root.Trim()
+    & git -C $root rev-parse --is-inside-work-tree | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
     $prefix = & git rev-parse --show-prefix
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
@@ -824,7 +849,11 @@ try {
                 if (-not (Test-AcceptedMode -Mode $stage.Mode)) {
                     Write-CommitError "无法提交该路径的类型: $pp"
                 }
-                $head = Split-TreeModeBlob -Line ([string](& git -C $root ls-tree HEAD -- $pp))
+                $headLine = [string](& git -C $root ls-tree HEAD -- $pp)
+                if ($LASTEXITCODE -ne 0) {
+                    exit $LASTEXITCODE
+                }
+                $head = Split-TreeModeBlob -Line $headLine
                 $headMode = ''
                 $headBlob = ''
                 if ($null -ne $head) {
@@ -904,7 +933,13 @@ try {
                 continue
             }
             $stageLine = [string](& git -C $root ls-files -s -- $norm)
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
             $headLine = [string](& git -C $root ls-tree HEAD -- $norm)
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
             $hasIndex = -not [string]::IsNullOrWhiteSpace($stageLine)
             $hasHead = -not [string]::IsNullOrWhiteSpace($headLine)
             $hasWork = Test-WorktreeHas -Rel $norm
@@ -995,7 +1030,13 @@ try {
                 }
             }
             $stageLine = [string](& git -C $root ls-files -s -- $norm)
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
             $headLine = [string](& git -C $root ls-tree HEAD -- $norm)
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
             $hasIndex = -not [string]::IsNullOrWhiteSpace($stageLine)
             $hasHead = -not [string]::IsNullOrWhiteSpace($headLine)
             if ((-not $hasIndex) -and $hasHead -and (Test-WorktreeHas -Rel $norm)) {
@@ -1148,6 +1189,9 @@ try {
     foreach ($item in @($pending)) {
         if ($item.Mode -ceq 'absent') {
             $gone = [string](& git -C $root ls-tree HEAD -- $item.Path)
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
             if (-not [string]::IsNullOrWhiteSpace($gone)) {
                 Write-CommitError '文件 diff 与指定 hunk 不一致'
             }
