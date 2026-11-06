@@ -13,7 +13,7 @@
 
 - CAHNGELOG 的一级标题为 `# 更新文档`，全文只有一个一级标题
 - 二级标题为版本节标题，形态为 `## X.Y.Z（YYYY-MM-DD）`（`X.Y.Z` 为版本号，全角括号 `（）` 内为发布日期）；全文版本节自上而下按发布日期递减排列
-- 二级标题对应的内容形态为 `- :shortcode: (scope) 描述` 或 `- type(scope): subject`（条目类型为 shortcode 或 cz 文字类型，半角括号内为 `scope`，其后为描述）
+- 二级标题对应的内容形态为 `- :shortcode: (scope) 描述` 或 `- type(scope): subject`（条目类型为 shortcode 或 Conventional Commits 文字类型，半角括号内为 `scope`，其后为描述）
 - 节点之间保留一个空行，标题和内容之间保留一个空行
 
 ## 示例

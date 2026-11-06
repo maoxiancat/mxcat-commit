@@ -41,10 +41,10 @@ git for-each-ref --sort=v:refname --format '%(refname:short) %(creatordate:short
 
 ## 条目类型
 
-- 条目类型有两种 shortcode 和 cz 文字类型，两套不混写
-- 如项目中已使用 shortcode 或 cz 文字类型，则沿用对应的种类，如没有则使用 shortcode
+- 条目类型有两种 shortcode 和 Conventional Commits 文字类型，两套不混写
+- 如项目中已使用 shortcode 或 Conventional Commits 文字类型，则沿用对应的种类，如没有则使用 shortcode
 - 使用 shortcode 时，具体类型列表见 [emoji-shortcode-list.md](modify-type-list/emoji-shortcode-list.md)。
-- 使用 cz 文字类型时，具体类型列表见 [conventional-commits-list.md](modify-type-list/conventional-commits-list.md)。
+- 使用 Conventional Commits 文字类型时，具体类型列表见 [conventional-commits-list.md](modify-type-list/conventional-commits-list.md)。
 
 ## scope
 
