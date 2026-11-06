@@ -1,13 +1,10 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  mxcat-commit 是公开 Agent 技能，实现位于 skills/mxcat-commit/。
+  主规格 openspec/specs/mxcat-commit/spec.md 从该目录的现行文本反向整理。
+  技能不附带提交脚本。提交、推送与恢复都由 Agent 按规格调用 git 完成。
+  用户或目标仓库的规则与本技能冲突时，以用户和仓库一侧为准。
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
