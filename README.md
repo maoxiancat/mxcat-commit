@@ -1,6 +1,6 @@
 # mxcat-commit
 
-公开的 GitHub 技能源：提供 `mxcat-commit`，用 cz-emoji shortcode 生成提交信息，可通过 `npx skills` 安装到 Cursor、Claude Code 等 Agent。
+公开的 GitHub 技能源：提供 `mxcat-commit`，分析整棵未提交工作树，先出示预览，确认后再按逻辑分批提交，可通过 `npx skills` 安装到 Cursor、Claude Code 等 Agent。
 
 源仓库：https://github.com/maoxiancat/mxcat-commit
 

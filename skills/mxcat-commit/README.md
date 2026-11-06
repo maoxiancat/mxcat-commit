@@ -1,6 +1,6 @@
 # mxcat-commit
 
-生成 cz-emoji shortcode 风格的提交信息。技能包入口是同目录的 `SKILL.md`。
+分析整棵未提交工作树，先出示预览，确认后再按逻辑分批提交。技能包入口是同目录的 `SKILL.md`。
 
 源仓库：https://github.com/maoxiancat/mxcat-commit
 

@@ -1,5 +1,15 @@
 # 更新文档
 
+## 2.0.0（2026-11-06）
+
+- :boom: (mxcat-commit) 技能包不再附带 commit_one 与 validate，提交和推送改由 Agent 直接调用 git；同一文件按 hunk 拆开时，补丁对不上当前 diff、文件是二进制、改名还要拆内容，或路径尚未入库，会停止后续提交
+- :boom: (mxcat-commit) 预览后只认陈述语气的确认；改标题、正文、合并、拆分或丢掉条目后必须重出整单再确认。每条预览分为序号、标题、正文、解释。收尾改为「尚未提交/push commit，请回复「提交」「提交并 push」等进行提交、push，如要改稿，请直接说明需要做的改动，将重出整单预览」
+- :boom: (mxcat-commit) 成功回应改为「已提交完成。」「已推送完成。」「已提交并推送完成。」，每条列出短 hash、完整标题和增删行数
+- :boom: (mxcat-commit) 某条提交失败时撤回本轮已创建且未推送的 commit 并再试一次，工作区改动保留；已经推送的提交需说明并等确认后才撤回
+- :sparkles: (mxcat-commit) 标题类型跟随仓库已有 commit，沿用 shortcode，或改用写在冒号里的 Conventional Commits 文字类型，两套不混用；两种都没有时仍用 shortcode
+- :sparkles: (mxcat-commit) 只推送本次预览中的 commit，不属于这次预览的未推送 commit 会提醒且不推；远程不止一条分支时，直接推送到 main 或 master 会先提醒并等待确认
+- :sparkles: (mxcat-commit) 用户或仓库规则与技能冲突时，以用户和仓库一侧为准
+
 ## 1.4.8（2026-09-29）
 
 - :bug: (mxcat-commit) Windows PowerShell 用无 BOM UTF-8 把说明送进子进程，简体中文原样进入 commit；仓库根含非 ASCII 字符时 `git -C` 仍用真实路径，失败则在创建 commit 之前退出
