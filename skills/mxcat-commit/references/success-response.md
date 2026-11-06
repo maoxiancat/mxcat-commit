@@ -11,7 +11,7 @@
 
 - 仅使用只读命令，不改 index、HEAD 或工作区
 - 只列出本次实际提交/push 的 commit
-- commit 信息之间保留一个空行
+- 每组 commit 信息之间保留一个空行
 - 成功回应中的 commit 信息包括三部分
     - `Commit Hash：` 使用短 hash
     - `标题：` 完整 header
