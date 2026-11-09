@@ -1,5 +1,11 @@
 # 更新文档
 
+## 2.0.1（2026-11-09）
+
+- :memo: (success-response) 成功回应不再输出仓库名与仓库地址，push 回执只保留分支；仅提交成功时推送提议改为「远程」
+- :memo: (success-response) 示例中 `Commit Hash` 行去掉列表前缀，并删掉组间空行与 origin 相关前提
+- :memo: (commit-header) 标题规范明确依赖、工具、skill 的升级、删除与维护归 `wrench` 或 `chore`，不按其内部改动另分类
+
 ## 2.0.0（2026-11-06）
 
 - :boom: (mxcat-commit) 技能包不再附带 commit_one 与 validate，提交和推送改由 Agent 直接调用 git；同一文件按 hunk 拆开时，补丁对不上当前 diff、文件是二进制、改名还要拆内容，或路径尚未入库，会停止后续提交
