@@ -7,6 +7,12 @@
 - 按照预览时 commit 的标题/内容以及顺序提交 commit
 - 在提交时应检查提交的内容是否与预览的一致，如有不一致则依照新内容再次预览而不是提交 commit
 - 同一已跟踪文件出现在多条预览时，每条 commit 只带走对应的 hunk。
+- 分析定稿时为每条记下路径清单。同一已跟踪文件出现在多条预览时，记下这条从 git diff HEAD 带走的完整 hunk。提交使用这份记录。
+- 提交前重新读取 git diff HEAD。与记录不一致时，按新内容再次预览，不提交。
+- commit 均使用 `git commit --only -- <这条的路径>` 提交，包括最后一条。不使用不带路径的 `git commit`，不使用 `git commit -a`、`git add -A`、`git add .`、`git add -u`，也不使用 `--include`。同一文件要拆 hunk 时，先写入本条内容，再执行这条命令。
+- 未跟踪路径先 git add -- <该路径>，再 --only。
+- 同一路径只出现在一条预览时，提交该路径相对 HEAD 的工作区全文。
+- 同一已跟踪文件出现在多条预览时，本批开始时保留当时的 `git diff HEAD`。先将该文件全文备份到仓库外，并用 `git hash-object -w` 写入对象库。用本批开始时的 `HEAD` 版本，叠上本批中排在前面且实际会提交的该文件 hunk，再叠上本条的 hunk，得到本条文件内容并写入工作区，然后对该路径执行 `--only`。提交后把备份写回工作区；提交失败也写回。写回不用 `git restore`。
 - 在按序提交多条 commit 时，任意一条 commit 提交失败，则停止后续操作并且把已提交 commit 撤回(不要 restore)，尝试重新提交，如还是失败则对用户进行说明
 - 在提交成功后依照 [success-response.md](success-response.md) 中的内容对用户进行说明
 
