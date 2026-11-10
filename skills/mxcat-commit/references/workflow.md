@@ -31,7 +31,7 @@
 ## 6. 确认后经入口提交
 
 - 在用户批准提交之后，根据 [commit-push.md](commit-push.md) 中的规范以及用户的具体要求进行对应的操作
-- 需要 push 时，仅在本次将提交的 commit 均提交完毕后再进行统一 push，任意一条 commit 提交失败，则停止后续操作并且把已提交 commit 撤回
+- 需要 push 时，仅在本次将提交的 commit 均提交完毕后再进行统一 push，仅 push 预览中的 commit，任意一条 commit 提交失败，则停止后续操作并且把已提交 commit 撤回
 
 ## 7. 成功回执
 

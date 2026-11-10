@@ -6,7 +6,7 @@
 
 - 需要撤回已提交但未 push 的 commit 时，使用 `git reset --soft` 进行撤回。不要 `git restore`。
 - 需要撤回已提交且已 push 的 commit 时，应和用户说明并等待用户确认再确定使用 `git revert` 还是 
-`git reset + force push`
+`git reset --soft + force push`
 - 需要撤回已提交且已 push 的 commit ，本地工作区还进行会与撤回产生冲突的更改时，应和用户说明并按照用户的要求进行操作
 
 ## hunk

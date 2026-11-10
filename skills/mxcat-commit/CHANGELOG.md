@@ -5,6 +5,8 @@
 - :memo: (success-response) 成功回应不再输出仓库名与仓库地址，push 回执只保留分支；仅提交成功时推送提议改为「远程」
 - :memo: (success-response) 示例中 `Commit Hash` 行去掉列表前缀，并删掉组间空行与 origin 相关前提
 - :memo: (commit-header) 标题规范明确依赖、工具、skill 的升级、删除与维护归 `wrench` 或 `chore`，不按其内部改动另分类
+- :memo: (workflow) 统一 push 明确只推送本次预览中的 commit
+- :memo: (recovery) 已推送 commit 的重置撤回明确为 `git reset --soft` 后再 force push
 
 ## 2.0.0（2026-11-06）
 
